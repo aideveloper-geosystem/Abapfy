@@ -4,7 +4,7 @@ Todas as mudanças notáveis deste projeto serão documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
-## [Não lançado]
+## [0.3.14] - 2026-09-28
 
 ### Adicionado
 
