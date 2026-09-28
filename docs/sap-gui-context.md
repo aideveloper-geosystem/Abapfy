@@ -1,0 +1,17 @@
+# Contexto visual SAP GUI
+
+Em **Configurações → Contexto SAP**, ative a captura visual, clique em **Atualizar**, escolha uma janela SAP GUI e use **Testar captura** para conferir a imagem. A configuração é local por conta Abapfy em `<userData>/sap-gui/<id-da-conta>.json` e fica desativada por padrão. A seleção anterior baseada em SAP GUI Scripting é limpa automaticamente; escolha uma janela novamente. Nenhum SQL novo é necessário.
+
+O Abapfy identifica janelas pertencentes aos processos `saplogon` e `sapgui` no mesmo desktop do Windows. Não usa SAP GUI Scripting. Se o SAP Logon estiver aberto sem conexão, a seção mostra que há um processo, mas nenhuma janela selecionável. Uma sessão em navegador, SAP Business Client, RDP ou Citrix não aparece como janela local desses processos nesta versão.
+
+Quando o recurso está ativo, o aplicativo captura somente a janela escolhida a cada mensagem e envia a imagem ao provedor de IA selecionado, junto da pergunta. A captura não é gravada no histórico do chat nem no JSON local. O chat mostra etapas animadas de identificação e captura; a skill nativa **Contexto visual SAP GUI** orienta o agente a distinguir elementos legíveis de suposições. A resposta e o registro de atividade seguem a persistência normal da conversa. Imagens podem conter dados visíveis na tela: confira a prévia antes de ativar o uso no chat.
+
+## Controle da V2
+
+Na mesma seção, **Autorização de ações** oferece três modos: desativado (padrão), perguntar antes de cada ação e permitir ações básicas automaticamente. As preferências ficam no JSON local por conta. Alterar a janela selecionada ou desativar a captura também desativa o controle.
+
+Quando o usuário pede explicitamente uma ação e menciona a tela SAP, o agente pode clicar, digitar texto (até 4.000 caracteres por ação) e pressionar Tab, Enter, Esc, Backspace ou setas. O limite é de cinco ações por mensagem, com uma nova captura após cada uma. Nenhum comando de shell, SAP GUI Scripting, tecla de atalho de salvar ou executar é exposto ao modelo. No modo automático, Enter, texto com quebra de linha e cliques na faixa superior da janela continuam exigindo confirmação. Na confirmação, o usuário vê o texto exato antes da digitação. A janela e o processo são verificados novamente antes de cada ação, e a entrada só é enviada quando a janela SAP está em primeiro plano. A resposta final deve conferir a imagem e não assumir que enviar teclas concluiu uma alteração.
+
+Para testar com baixo risco, abra um editor de um programa de teste na SE38, selecione **Perguntar antes de cada ação** e peça: “Digite `* Teste de controle Abapfy` na linha vazia do editor. Não salve nem execute.” Confira a descrição no cartão de autorização antes de aprovar. O controle usa entrada de teclado/mouse do Windows; o comportamento exato no editor SAP depende da instalação e deve ser verificado visualmente. Caso o modelo selecionado não aceite imagens ou ferramentas, o provedor retorna erro e o chat apresenta essa falha.
+
+Se a interface mostrar que a ponte de controle está desatualizada, feche completamente o Abapfy e abra novamente. Em desenvolvimento, pare o processo `pnpm dev` e inicie-o de novo. O renderer pode atualizar sem recarregar o preload ou o processo principal; a seção de configurações e o chat verificam a versão antes de oferecer ações ao agente.

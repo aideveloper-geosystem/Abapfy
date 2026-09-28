@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { AlertCircle, Bot, CheckCircle2, FileText, Loader2, RefreshCw, XCircle } from 'lucide-react'
+import { AlertCircle, Bot, CheckCircle2, FileText, Loader2, Monitor, RefreshCw, XCircle } from 'lucide-react'
 import { Markdown } from './Markdown'
 import { EfDocxGenerator } from './EfDocxGenerator'
 import { StructuredJson } from './StructuredJson'
@@ -16,7 +16,7 @@ import { parseClarify } from '@renderer/lib/clarify'
 export interface ToolActivityItem {
   id: string
   label: string
-  kind: 'skill' | 'mcp'
+  kind: 'skill' | 'mcp' | 'sap'
   status: 'running' | 'confirm' | 'done' | 'error'
 }
 
@@ -38,9 +38,18 @@ export interface UiMessage {
 }
 
 function ToolActivityBadges({ items }: { items: ToolActivityItem[] }): JSX.Element {
+  const sapItems = items.filter((item) => item.kind === 'sap')
   return (
+    <>
+    {sapItems.length > 0 && <div className={`chat-sap-activity ${sapItems.some((item) => item.status === 'running') ? 'chat-sap-activity-live' : ''}`}>
+      <div className="chat-sap-activity-heading"><Monitor size={14} /> Contexto SAP <span>{sapItems.some((item) => item.status === 'confirm') ? 'aguardando autorização' : sapItems.some((item) => item.status === 'running') ? 'interagindo com SAP' : sapItems.some((item) => item.status === 'error') ? 'ação interrompida' : 'pronto'}</span></div>
+      <div className="chat-sap-activity-steps">{sapItems.map((item) => <div key={item.id} className={`chat-sap-activity-step chat-sap-activity-step-${item.status}`}>
+        {item.status === 'running' ? <Loader2 size={12} className="chat-tool-badge-spin" /> : item.status === 'confirm' ? <AlertCircle size={12} className="chat-tool-badge-pulse" /> : item.status === 'error' ? <XCircle size={12} /> : <CheckCircle2 size={12} />}
+        {item.label}
+      </div>)}</div>
+    </div>}
     <div className="chat-tool-activity">
-      {items.map((item) => (
+      {items.filter((item) => item.kind !== 'sap').map((item) => (
         <span key={item.id} className={`chat-tool-badge chat-tool-badge-${item.status}`}>
           {item.status === 'running' ? (
             <Loader2 size={11} strokeWidth={2} className="chat-tool-badge-spin" />
@@ -55,6 +64,7 @@ function ToolActivityBadges({ items }: { items: ToolActivityItem[] }): JSX.Eleme
         </span>
       ))}
     </div>
+    </>
   )
 }
 

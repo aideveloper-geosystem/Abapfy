@@ -839,6 +839,18 @@
   margin-bottom: var(--space-xs);
 }
 
+.chat-sap-activity { position: relative; overflow: hidden; margin: 0 0 10px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--color-primary-hover) 40%, var(--color-hairline)); border-radius: 12px; background: color-mix(in srgb, var(--color-primary-hover) 7%, var(--color-surface-2)); }
+.chat-sap-activity-live::after { content: ''; position: absolute; inset: 0 auto 0 -20%; width: 20%; pointer-events: none; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-primary-hover) 15%, transparent), transparent); animation: sap-context-scan 2s ease-in-out infinite; }
+.chat-sap-activity-heading { display: flex; align-items: center; gap: 7px; color: var(--color-primary-hover); font-size: 12px; font-weight: 700; }
+.chat-sap-activity-heading span { margin-left: auto; font-size: 10px; font-weight: 500; opacity: .8; }
+.chat-sap-activity-steps { display: grid; gap: 5px; margin-top: 9px; }
+.chat-sap-activity-step { display: flex; align-items: center; gap: 7px; color: var(--color-ink-tertiary); font-size: 11px; }
+.chat-sap-activity-step-running { color: var(--color-primary-hover); }
+.chat-sap-activity-step-confirm { color: var(--color-semantic-warning); }
+.chat-sap-activity-step-error { color: var(--color-semantic-danger); }
+@keyframes sap-context-scan { to { transform: translateX(600%); } }
+@media (prefers-reduced-motion: reduce) { .chat-sap-activity-live::after { animation: none; } }
+
 .chat-tool-badge {
   display: inline-flex;
   align-items: center;

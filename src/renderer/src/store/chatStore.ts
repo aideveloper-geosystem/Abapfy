@@ -47,7 +47,7 @@ export interface ChatMeta {
 export interface PersistedToolActivity {
   id: string
   label: string
-  kind: 'skill' | 'mcp'
+  kind: 'skill' | 'mcp' | 'sap'
   status: 'running' | 'confirm' | 'done' | 'error'
 }
 

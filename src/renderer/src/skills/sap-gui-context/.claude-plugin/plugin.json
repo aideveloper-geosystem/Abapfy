@@ -1,0 +1,5 @@
+{
+  "name": "sap-gui-context",
+  "description": "Contexto visual e controle opcional da janela SAP GUI selecionada no Abapfy",
+  "version": "1.0.0"
+}

@@ -1,5 +1,5 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { CompatibilityCallToolResultSchema } from '@modelcontextprotocol/sdk/types.js'
 
@@ -10,6 +10,9 @@ export interface McpServerConfig {
   url: string | null
   command: string | null
   args: string[]
+  cwd?: string
+  env?: Record<string, string>
+  headers?: Record<string, string>
 }
 
 export interface McpToolInfo {
@@ -36,6 +39,7 @@ export interface McpPromptInfo {
   serverName: string
   name: string
   description: string | null
+  arguments: Array<{ name: string; description?: string; required?: boolean }>
 }
 
 interface ConnectedServer {
@@ -49,7 +53,6 @@ const toolConfirmations = new Map<string, boolean>()
 // gerado no renderer — permite cancelar de verdade quando o usuário aborta a
 // resposta no meio de uma ferramenta MCP, em vez de deixar rodando até o timeout.
 const pendingCalls = new Map<string, AbortController>()
-const SAFE_STDIO_COMMANDS = new Set(['node', 'node.exe', 'npx', 'npx.cmd'])
 const WRITE_TOOL_PATTERN =
   /(^|_)(create|update|delete|remove|write|edit|activate|release|transport|import|deploy|execute|run|apply|commit|push|generate|refactor|rename|move|lock|unlock)(_|$)/i
 const READ_TOOL_PATTERN =
@@ -78,7 +81,26 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 function signature(config: McpServerConfig): string {
-  return JSON.stringify([config.transport, config.url, config.command, config.args])
+  return JSON.stringify([config.transport, config.url, config.command, config.args, config.cwd, config.env, config.headers])
+}
+
+function resolveVariables(value: string): string {
+  return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, key: string) => {
+    const resolved = process.env[key]
+    if (!resolved) throw new Error(`Variável de ambiente ${key} não configurada para o MCP.`)
+    return resolved
+  })
+}
+
+function platformCommand(command: string): string {
+  if (process.platform === 'win32') {
+    if (command === 'npx') return 'npx.cmd'
+    if (command === 'sap-devs') return 'sap-devs.exe'
+  } else {
+    if (command === 'npx.cmd') return 'npx'
+    if (command === 'sap-devs.exe') return 'sap-devs'
+  }
+  return command
 }
 
 function validateConfig(config: McpServerConfig): void {
@@ -88,14 +110,14 @@ function validateConfig(config: McpServerConfig): void {
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       throw new Error('A URL MCP deve usar HTTP ou HTTPS.')
     }
+    if (url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) {
+      throw new Error('Servidores MCP remotos precisam usar HTTPS.')
+    }
     return
   }
 
   if (!config.command) throw new Error('Servidor MCP stdio sem comando.')
-  const executable = config.command.replaceAll('\\', '/').split('/').pop()?.toLowerCase() ?? ''
-  if (!SAFE_STDIO_COMMANDS.has(executable)) {
-    throw new Error('Por segurança, comandos MCP stdio devem usar node ou npx.')
-  }
+  if (config.command.length > 2048 || /[\r\n\0]/.test(config.command)) throw new Error('Comando MCP stdio inválido.')
 }
 
 async function connect(config: McpServerConfig): Promise<Client> {
@@ -106,19 +128,29 @@ async function connect(config: McpServerConfig): Promise<Client> {
   if (cached) {
     await cached.client.close().catch(() => undefined)
     clients.delete(config.id)
+    for (const key of toolConfirmations.keys()) if (key.startsWith(`${config.id}:`)) toolConfirmations.delete(key)
   }
 
   const client = new Client({ name: 'abapfy', version: '0.3.6' })
   const transport =
     config.transport === 'streamable_http'
-      ? new StreamableHTTPClientTransport(new URL(config.url!))
+      ? new StreamableHTTPClientTransport(new URL(config.url!), {
+          requestInit: { headers: Object.fromEntries(Object.entries(config.headers ?? {}).map(([key, value]) => [key, resolveVariables(value)])) }
+        })
       : new StdioClientTransport({
-          command: config.command!,
+          command: platformCommand(config.command!),
           args: config.args,
+          ...(config.cwd ? { cwd: config.cwd } : {}),
+          ...(config.env ? { env: { ...getDefaultEnvironment(), ...Object.fromEntries(Object.entries(config.env).map(([key, value]) => [key, resolveVariables(value)])) } } : {}),
           stderr: 'pipe'
         })
 
-  await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, `conexão com ${config.name}`)
+  try {
+    await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, `conexão com ${config.name}`)
+  } catch (error) {
+    await client.close().catch(() => undefined)
+    throw error
+  }
   clients.set(config.id, { signature: nextSignature, client })
   return client
 }
@@ -128,9 +160,8 @@ function requiresConfirmation(tool: {
   annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean }
 }): boolean {
   if (tool.annotations?.destructiveHint === true) return true
-  if (tool.annotations?.readOnlyHint === true) return false
   if (WRITE_TOOL_PATTERN.test(tool.name)) return true
-  return !READ_TOOL_PATTERN.test(tool.name)
+  return !(tool.annotations?.readOnlyHint === true && READ_TOOL_PATTERN.test(tool.name))
 }
 
 function compactToolName(serverId: string, toolName: string): string {
@@ -274,11 +305,17 @@ export async function listMcpPrompts(configs: McpServerConfig[]): Promise<McpPro
         serverId: config.id,
         serverName: config.name,
         name: prompt.name,
-        description: prompt.description ?? null
+        description: prompt.description ?? null,
+        arguments: prompt.arguments ?? []
       }))
     })
   )
   return results.flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+}
+
+export async function getMcpPrompt(config: McpServerConfig, name: string, args: Record<string, string>): Promise<unknown> {
+  const client = await connect(config)
+  return withCall(config, client, undefined, (options) => client.getPrompt({ name, arguments: args }, options))
 }
 
 export async function closeMcpClients(): Promise<void> {

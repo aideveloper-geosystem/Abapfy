@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { supabase } from '@renderer/lib/supabaseClient'
 import { useAuthStore } from '@renderer/store/authStore'
 import type { AgentSource } from '@renderer/store/agentsStore'
+import type { McpLocalConfig, McpLocalServerConfig } from '../../../preload/index.d'
 
 export type McpTransport = 'streamable_http' | 'stdio'
 
@@ -15,6 +16,10 @@ export interface McpServerItem {
   command: string | null
   args: string[]
   enabled: boolean
+  cwd?: string
+  env?: Record<string, string>
+  headers?: Record<string, string>
+  disabledTools?: string[]
 }
 
 export interface McpBindingItem {
@@ -30,9 +35,9 @@ interface McpState {
   loading: boolean
   servers: McpServerItem[]
   bindings: McpBindingItem[]
+  localConfig: McpLocalConfig
   error: string | null
   load: () => Promise<void>
-  createPreset: (preset: 'sap_docs' | 'sap_abap') => Promise<void>
   updateServer: (id: string, changes: Partial<Omit<McpServerItem, 'id'>>) => Promise<void>
   removeServer: (id: string) => Promise<void>
   toggleBinding: (serverId: string, agentSource: AgentSource, agentId: string) => Promise<void>
@@ -75,11 +80,26 @@ function mapServer(row: ServerRow): McpServerItem {
     name: row.name,
     description: row.description ?? '',
     transport: row.transport,
-    url: row.url,
+    url: row.slug === 'sap-docs' && row.url === 'http://mcp-sap-docs.marianzeis.de/mcp'
+      ? 'https://mcp-sap-docs.marianzeis.de/mcp'
+      : row.url,
     command: row.command,
     args: parseArgs(row.args),
     enabled: row.enabled
   }
+}
+
+export function effectiveMcpServer(server: McpServerItem, local?: McpLocalServerConfig): McpServerItem {
+  if (!local) return server
+  const profile = local.profile?.trim()
+  const args = profile && server.slug === 'sap-abap'
+    ? server.args.includes('--profile')
+      ? server.args.map((arg, index) => server.args[index - 1] === '--profile' ? profile : arg)
+      : [...server.args, '--profile', profile]
+    : server.args
+  return { ...server, cwd: local.cwd, env: local.env, headers: local.headers, disabledTools: local.disabledTools,
+    // A identidade do servidor é definida pelo cadastro administrado.
+    args, url: server.url, command: server.command }
 }
 
 export const useMcpStore = create<McpState>((set, get) => ({
@@ -87,16 +107,18 @@ export const useMcpStore = create<McpState>((set, get) => ({
   loading: false,
   servers: [],
   bindings: [],
+  localConfig: { version: 1, servers: {}, catalog: { servers: [], bindings: [] } },
   error: null,
 
   load: async () => {
     const userId = currentUserId()
     if (!userId) return
     set({ loading: true, error: null })
-    const [{ data: serverRows, error: serverError }, { data: bindingRows, error: bindingError }] =
+    const [{ data: serverRows, error: serverError }, { data: bindingRows, error: bindingError }, localResult] =
       await Promise.all([
         supabase.from('mcp_servers').select('*').eq('user_id', userId).order('created_at'),
-        supabase.from('mcp_agent_bindings').select('*').eq('user_id', userId)
+        supabase.from('mcp_agent_bindings').select('*').eq('user_id', userId),
+        window.api.mcp.readLocalConfig(userId).then((config) => ({ config, error: null as string | null })).catch((cause: Error) => ({ config: { version: 1 as const, servers: {}, catalog: { servers: [], bindings: [] } }, error: cause.message }))
       ])
 
     const error = serverError ?? bindingError
@@ -105,63 +127,34 @@ export const useMcpStore = create<McpState>((set, get) => ({
       return
     }
 
+    if (currentUserId() !== userId) return
+
+    const mappedServers = ((serverRows as ServerRow[] | null) ?? []).map(mapServer)
+    const mappedBindings = ((bindingRows as BindingRow[] | null) ?? []).map((row) => ({
+      id: row.id, serverId: row.server_id, agentSource: row.agent_source, agentId: row.agent_id, enabled: row.enabled
+    }))
+    let localConfig = localResult.config
+    let localError = localResult.error
+    if (!localError) {
+      try {
+        localConfig = await window.api.mcp.saveLocalCatalog(userId, {
+          servers: mappedServers.map((server) => ({ id: server.id, slug: server.slug, name: server.name, transport: server.transport,
+            url: server.url, command: server.command, args: server.args, enabled: server.enabled })),
+          bindings: mappedBindings.map((binding) => ({ serverId: binding.serverId, agentSource: binding.agentSource,
+            agentId: binding.agentId, enabled: binding.enabled }))
+        })
+      } catch (cause) { localError = (cause as Error).message }
+    }
+    if (currentUserId() !== userId) return
+
     set({
       loaded: true,
       loading: false,
-      servers: ((serverRows as ServerRow[] | null) ?? []).map(mapServer),
-      bindings: ((bindingRows as BindingRow[] | null) ?? []).map((row) => ({
-        id: row.id,
-        serverId: row.server_id,
-        agentSource: row.agent_source,
-        agentId: row.agent_id,
-        enabled: row.enabled
-      }))
+      servers: mappedServers,
+      localConfig,
+      error: localError,
+      bindings: mappedBindings
     })
-  },
-
-  createPreset: async (preset) => {
-    const userId = currentUserId()
-    if (!userId || !useAuthStore.getState().role) { set({ error: 'Apenas master e administradores podem configurar integrações.' }); return }
-    const base =
-      preset === 'sap_docs'
-        ? {
-            slug: 'sap-docs',
-            name: 'SAP Docs',
-            description: 'Documentação SAP compartilhável entre vários agentes.',
-            transport: 'streamable_http' as const,
-            url: 'http://mcp-sap-docs.marianzeis.de/mcp',
-            command: null,
-            args: []
-          }
-        : {
-            slug: 'sap-abap',
-            name: 'SAP ABAP',
-            description: 'Acesso governado ao SAP via ADT. Configure o perfil local antes de usar.',
-            transport: 'stdio' as const,
-            url: null,
-            command: navigator.userAgent.includes('Windows') ? 'npx.cmd' : 'npx',
-            args: [
-              '--yes',
-              '--prefer-online',
-              '@coaspe/sap-abap-mcp@latest',
-              'serve',
-              '--profile',
-              'DEV100'
-            ]
-          }
-
-    let slug = base.slug
-    if (get().servers.some((server) => server.slug === slug)) slug = `${slug}-${Date.now().toString(36)}`
-    const { data, error } = await supabase
-      .from('mcp_servers')
-      .insert({ user_id: userId, ...base, slug, enabled: true })
-      .select('*')
-      .single()
-    if (error || !data) {
-      set({ error: error?.message ?? 'Não foi possível criar o servidor MCP.' })
-      return
-    }
-    set((state) => ({ servers: [...state.servers, mapServer(data as ServerRow)], error: null }))
   },
 
   updateServer: async (id, changes) => {
@@ -259,8 +252,11 @@ export const useMcpStore = create<McpState>((set, get) => ({
         )
         .map((binding) => binding.serverId)
     )
-    return get().servers.filter((server) => server.enabled && activeServerIds.has(server.id))
+    const projectServers = new Set(['ui5', 'cap', 'fiori'])
+    return get().servers.filter((server) => server.enabled && activeServerIds.has(server.id) &&
+      (!projectServers.has(server.slug) || Boolean(get().localConfig.servers[server.id]?.cwd)))
+      .map((server) => effectiveMcpServer(server, get().localConfig.servers[server.id]))
   },
 
-  reset: () => set({ loaded: false, loading: false, servers: [], bindings: [], error: null })
+  reset: () => set({ loaded: false, loading: false, servers: [], bindings: [], localConfig: { version: 1, servers: {}, catalog: { servers: [], bindings: [] } }, error: null })
 }))

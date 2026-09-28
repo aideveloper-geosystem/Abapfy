@@ -4,6 +4,14 @@ import type { AiProviderId } from '@renderer/lib/aiProviders'
 export interface ChatTurn {
   role: 'user' | 'assistant'
   content: string
+  /** Captura visual efêmera da janela SAP, somente no turno atual. */
+  imageDataUrl?: string
+}
+
+function pngBase64(turn: { role: string; imageDataUrl?: string }): string | null {
+  if (turn.role !== 'user' || !turn.imageDataUrl?.startsWith('data:image/png;base64,')) return null
+  const data = turn.imageDataUrl.slice('data:image/png;base64,'.length)
+  return data.length <= 8 * 1024 * 1024 && /^[A-Za-z0-9+/=]+$/.test(data) ? data : null
 }
 
 export const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh'] as const
@@ -110,7 +118,12 @@ async function streamOpenAi(args: StreamChatArgs): Promise<void> {
       model: args.model,
       stream: true,
       stream_options: { include_usage: true },
-      messages: messages.map((turn) => ({ role: turn.role, content: turn.content }))
+      messages: messages.map((turn) => {
+        const image = pngBase64(turn)
+        return { role: turn.role, content: image
+          ? [{ type: 'text', text: turn.content }, { type: 'image_url', image_url: { url: `data:image/png;base64,${image}` } }]
+          : turn.content }
+      })
     })
   })
 
@@ -155,7 +168,9 @@ async function streamGemini(args: StreamChatArgs): Promise<void> {
   const body: Record<string, unknown> = {
     contents: args.messages.map((turn) => ({
       role: turn.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: turn.content }]
+      parts: pngBase64(turn)
+        ? [{ inlineData: { mimeType: 'image/png', data: pngBase64(turn) } }, { text: turn.content }]
+        : [{ text: turn.content }]
     }))
   }
   if (args.systemPrompt) {
@@ -220,7 +235,12 @@ async function streamClaude(args: StreamChatArgs): Promise<void> {
       thinking: { type: 'adaptive' },
       output_config: { effort: args.claudeEffort ?? 'medium' },
       ...(args.systemPrompt ? { system: args.systemPrompt } : {}),
-      messages: args.messages.map((turn) => ({ role: turn.role, content: turn.content }))
+      messages: args.messages.map((turn) => {
+        const image = pngBase64(turn)
+        return { role: turn.role, content: image
+          ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: image } }, { type: 'text', text: turn.content }]
+          : turn.content }
+      })
     })
   })
 

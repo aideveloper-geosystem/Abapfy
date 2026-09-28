@@ -9,6 +9,9 @@ interface McpServerConfig {
   url: string | null
   command: string | null
   args: string[]
+  cwd?: string
+  env?: Record<string, string>
+  headers?: Record<string, string>
 }
 
 interface McpToolInfo {
@@ -22,6 +25,7 @@ interface McpToolInfo {
   // Ferramenta sintética gerada aqui (não vem do servidor) que despacha pra
   // `mcp:readResource` em vez de `mcp:callTool` — ver buildResourceTools().
   isResourceReader?: boolean
+  resourceUris?: string[]
 }
 
 type McpResourceInfo = Awaited<ReturnType<typeof window.api.mcp.listResources>>[number]
@@ -54,7 +58,7 @@ const MAX_TOOL_ROUNDS = 6
 const MAX_RESULT_CHARS = 30000
 
 function asConfig(server: McpServerItem): McpServerConfig {
-  return { id: server.id, name: server.name, transport: server.transport, url: server.url, command: server.command, args: server.args }
+  return { id: server.id, name: server.name, transport: server.transport, url: server.url, command: server.command, args: server.args, cwd: server.cwd, env: server.env, headers: server.headers }
 }
 
 function safeJson(value: unknown): string {
@@ -64,31 +68,6 @@ function safeJson(value: unknown): string {
 }
 
 let toolEventSeq = 0
-const TOOL_RETRY_ATTEMPTS = 1
-const TOOL_RETRY_DELAY_MS = 900
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-// Servidor MCP resolve URL/spawn de novo a cada tentativa; um hiccup de rede
-// (DNS, conexão recusada, timeout do transporte) não deveria derrubar o loop
-// inteiro e cair no fallback textual "Falha MCP nesta interação" — vale uma
-// segunda tentativa curta antes de desistir. Recusa do usuário (dialog/card)
-// não passa por aqui: isso volta como resultado normal com isError, não como
-// exceção, então nunca é retentado.
-async function callWithRetry(run: () => Promise<unknown>): Promise<unknown> {
-  let lastError: unknown
-  for (let attempt = 0; attempt <= TOOL_RETRY_ATTEMPTS; attempt += 1) {
-    try {
-      return await run()
-    } catch (error) {
-      lastError = error
-      if (attempt < TOOL_RETRY_ATTEMPTS) await delay(TOOL_RETRY_DELAY_MS)
-    }
-  }
-  throw lastError
-}
 
 async function executeTool(
   tools: McpToolInfo[],
@@ -100,6 +79,9 @@ async function executeTool(
 ): Promise<ToolExecution> {
   const tool = tools.find((item) => item.qualifiedName === qualifiedName)
   if (!tool) throw new Error(`Ferramenta MCP desconhecida: ${qualifiedName}`)
+  if (tool.isResourceReader && !tool.resourceUris?.includes(String(args.uri ?? ''))) {
+    throw new Error('Recurso MCP não consta no catálogo consultado.')
+  }
   const config = configs.find((item) => item.id === tool.serverId)
   if (!config) throw new Error(`Configuração MCP não encontrada para ${tool.serverName}.`)
   toolEventSeq += 1
@@ -126,7 +108,9 @@ async function executeTool(
   signal.addEventListener('abort', onAbort)
 
   try {
-    const result = await callWithRetry(() =>
+    // Uma exceção pode ocorrer depois da gravação no servidor. Não repetir
+    // uma ferramenta automaticamente sem comprovar seu efeito.
+    const result = await (
       tool.isResourceReader
         ? window.api.mcp.readResource(config, String(args.uri ?? ''), eventId)
         : window.api.mcp.callTool(config, tool.name, args, eventId)
@@ -174,13 +158,14 @@ async function buildResourceTools(configs: McpServerConfig[]): Promise<McpToolIn
         required: ['uri']
       },
       requiresConfirmation: false,
-      isResourceReader: true
+      isResourceReader: true,
+      resourceUris: list.map((resource) => resource.uri)
     }
   })
 }
 
 async function runOpenAi(args: RunMcpArgs, configs: McpServerConfig[], tools: McpToolInfo[]): Promise<ToolExecution[]> {
-  const messages: Array<Record<string, unknown>> = [...(args.systemPrompt ? [{ role: 'system', content: args.systemPrompt }] : []), ...args.messages]
+  const messages: Array<Record<string, unknown>> = [...(args.systemPrompt ? [{ role: 'system', content: args.systemPrompt }] : []), ...args.messages.map((turn) => ({ role: turn.role, content: turn.content }))]
   const executions: ToolExecution[] = []
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
     const response = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', signal: args.signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${args.apiKey}` }, body: JSON.stringify({ model: args.model, stream: false, messages, tools: tools.map((tool) => ({ type: 'function', function: { name: tool.qualifiedName, description: `[${tool.serverName}] ${tool.description}`, parameters: tool.inputSchema } })), tool_choice: 'auto' }) })
@@ -249,13 +234,24 @@ async function runGemini(args: RunMcpArgs, configs: McpServerConfig[], tools: Mc
 export async function runMcpToolLoop(args: RunMcpArgs): Promise<string | null> {
   if (args.servers.length === 0) return null
   const configs = args.servers.map(asConfig)
-  const [serverTools, resourceTools] = await Promise.all([
-    window.api.mcp.listTools(configs),
+  const [listings, resourceTools] = await Promise.all([
+    Promise.allSettled(configs.map((config) => window.api.mcp.listTools([config]))),
     buildResourceTools(configs)
   ])
-  const tools = [...serverTools, ...resourceTools]
-  if (tools.length === 0) return null
+  const failures = listings.flatMap((result, index) => result.status === 'rejected'
+    ? [`${configs[index].name}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`]
+    : [])
+  const serverTools = listings.flatMap((result) => result.status === 'fulfilled' ? result.value : [])
+  const disabled = new Map(args.servers.map((server) => [server.id, new Set(server.disabledTools ?? [])]))
+  const tools = [...serverTools, ...resourceTools].filter((tool) => !disabled.get(tool.serverId)?.has(tool.name))
+  if (tools.length === 0) {
+    if (failures.length) throw new Error(failures.join('\n'))
+    return null
+  }
   const executions = args.provider === 'openai' ? await runOpenAi(args, configs, tools) : args.provider === 'claude' ? await runClaude(args, configs, tools) : await runGemini(args, configs, tools)
-  if (executions.length === 0) return null
-  return ['## Evidências obtidas por ferramentas MCP nesta interação', 'Use os resultados abaixo como evidência. Não afirme que uma ação ocorreu além do que o retorno comprova.', ...executions.map((execution, index) => `### ${index + 1}. ${execution.tool.serverName} / ${execution.tool.name}\nArgumentos: ${safeJson(execution.args)}\nResultado: ${safeJson(execution.result)}`)].join('\n\n')
+  if (executions.length === 0 && failures.length === 0) return null
+  return [
+    ...(failures.length ? ['## Servidores MCP indisponíveis nesta interação', ...failures] : []),
+    ...(executions.length ? ['## Evidências obtidas por ferramentas MCP nesta interação', 'Use os resultados abaixo como evidência. Não afirme que uma ação ocorreu além do que o retorno comprova.', ...executions.map((execution, index) => `### ${index + 1}. ${execution.tool.serverName} / ${execution.tool.name}\nArgumentos: ${safeJson(execution.args)}\nResultado: ${safeJson(execution.result)}`)] : [])
+  ].join('\n\n')
 }

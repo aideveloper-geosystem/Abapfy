@@ -4,6 +4,22 @@ Todas as mudanças notáveis deste projeto serão documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [Não lançado]
+
+### Adicionado
+
+- Gerenciador MCP por usuário com catálogo SAP/UI5/CAP/Fiori/SAP Developers/GitHub/Playwright, cadastro e importação de servidores HTTP ou stdio, vínculos por agente e inspeção de ferramentas, recursos e prompts.
+- Parâmetros locais por conta em JSON; valores de ambiente e headers são protegidos pela criptografia do sistema operacional.
+- Contexto visual SAP GUI em seção própria, com detecção de janela por processo, prévia, imagem efêmera no chat, skill nativa e atividade animada.
+- Controle opcional da janela SAP GUI por clique, texto e teclas básicas, com autorização por ação ou permissão local persistente, nova captura após cada passo e limite de ações por mensagem.
+
+### Corrigido
+
+- Preset SAP Docs usa HTTPS; chamadas MCP com resultado incerto não são repetidas automaticamente.
+- Servidores stdio exigem confirmação antes de qualquer operação e são encerrados ao sair da conta.
+- O cadastro de presets MCP envia somente as colunas existentes em `mcp_servers`.
+- A digitação no controle SAP usa a estrutura `INPUT` completa exigida pelo Windows; falhas nativas aparecem como mensagens legíveis no chat, sem XML do PowerShell.
+
 ## [0.3.13] - 2026-09-28
 
 ### Adicionado

@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, dialog, ipcMain } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -7,6 +7,7 @@ import {
   callMcpTool,
   cancelMcpCall,
   closeMcpClients,
+  getMcpPrompt,
   listMcpPrompts,
   listMcpResources,
   listMcpTools,
@@ -14,9 +15,12 @@ import {
   readMcpResource,
   type McpServerConfig
 } from './mcp'
+import { readMcpLocalConfig, saveMcpLocalCatalog, saveMcpLocalServerConfig, type McpLocalConfig, type McpLocalServerConfig } from './mcpLocalConfig'
+import { scanSapWindows, readSapWindowSettings, saveSapWindowSettings, captureSapWindow, performSapControl, type SapWindowSettings, type SapControlAction } from './sapWindowContext'
 
 let mainWindow: BrowserWindow | null = null
 const approvedStdioConfigs = new Set<string>()
+const pendingStdioApprovals = new Map<string, Promise<boolean>>()
 const mainDirectory = dirname(fileURLToPath(import.meta.url))
 const icon = join(mainDirectory, '../../resources/abapfy-horizon-mark.png')
 
@@ -142,7 +146,8 @@ function requestMcpConfirmation(request: McpConfirmationRequest): Promise<boolea
   surfaceMainWindow()
   if (!mainWindow) return Promise.resolve(false)
   return new Promise<boolean>((resolve) => {
-    pendingConfirmations.set(request.callId, resolve)
+    const timeout = setTimeout(() => resolveMcpConfirmation(request.callId, false), 120_000)
+    pendingConfirmations.set(request.callId, (approved) => { clearTimeout(timeout); resolve(approved) })
     mainWindow?.webContents.send('mcp:confirmation-pending', request)
   })
 }
@@ -155,7 +160,46 @@ function resolveMcpConfirmation(callId: string, approved: boolean): void {
   mainWindow?.webContents.send('mcp:confirmation-resolved', { callId, approved })
 }
 
+async function ensureMcpStartupApproved(config: McpServerConfig): Promise<void> {
+  if (config.transport !== 'stdio') return
+  const approvalKey = JSON.stringify([config.id, config.command, config.args, config.cwd, config.env])
+  if (approvedStdioConfigs.has(approvalKey)) return
+  let pending = pendingStdioApprovals.get(approvalKey)
+  if (!pending) {
+    const callId = `server-${config.id}-${Date.now()}`
+    pending = requestMcpConfirmation({
+      callId,
+      kind: 'server',
+      serverName: config.name,
+      detail: `Executável: ${config.command ?? ''}\nArgumentos: ${config.args.join(' ')}\nPasta: ${config.cwd ?? 'padrão'}\n\nConfirme apenas se reconhece esta configuração. A autorização vale até fechar o aplicativo.`
+    })
+    pendingStdioApprovals.set(approvalKey, pending)
+  }
+  try {
+    if (!await pending) throw new Error(`Inicialização de ${config.name} cancelada.`)
+    approvedStdioConfigs.add(approvalKey)
+  } finally {
+    pendingStdioApprovals.delete(approvalKey)
+  }
+}
+
 function registerMcpIpc(): void {
+  ipcMain.handle('mcp:closeAll', async () => {
+    for (const callId of pendingConfirmations.keys()) resolveMcpConfirmation(callId, false)
+    approvedStdioConfigs.clear()
+    pendingStdioApprovals.clear()
+    await closeMcpClients()
+  })
+  ipcMain.handle('mcp:readLocalConfig', (_event, userId: string) => readMcpLocalConfig(userId))
+  ipcMain.handle('mcp:saveLocalCatalog', (_event, userId: string, catalog: McpLocalConfig['catalog']) => saveMcpLocalCatalog(userId, catalog))
+  ipcMain.handle('mcp:saveLocalServerConfig', (_event, userId: string, serverId: string, config: McpLocalServerConfig | null) =>
+    saveMcpLocalServerConfig(userId, serverId, config)
+  )
+  ipcMain.handle('mcp:pickDirectory', async () => {
+    const options: Electron.OpenDialogOptions = { properties: ['openDirectory'] }
+    const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options)
+    return result.canceled ? null : result.filePaths[0]
+  })
   ipcMain.handle(
     'mcp:confirmationResponse',
     (_event, payload: { callId: string; approved: boolean }) => {
@@ -172,19 +216,7 @@ function registerMcpIpc(): void {
   })
 
   ipcMain.handle('mcp:listTools', async (_event, configs: McpServerConfig[]) => {
-    for (const config of configs.filter((item) => item.transport === 'stdio')) {
-      const approvalKey = JSON.stringify([config.id, config.command, config.args])
-      if (approvedStdioConfigs.has(approvalKey)) continue
-      const callId = `server-${config.id}-${Date.now()}`
-      const approved = await requestMcpConfirmation({
-        callId,
-        kind: 'server',
-        serverName: config.name,
-        detail: `Executável: ${config.command ?? ''}\nArgumentos: ${config.args.join(' ')}\n\nConfirme apenas se reconhece esta configuração. A autorização vale até fechar o aplicativo.`
-      })
-      if (!approved) throw new Error(`Inicialização de ${config.name} cancelada.`)
-      approvedStdioConfigs.add(approvalKey)
-    }
+    for (const config of configs) await ensureMcpStartupApproved(config)
     return listMcpTools(configs)
   })
 
@@ -197,6 +229,7 @@ function registerMcpIpc(): void {
       args: Record<string, unknown>,
       callId?: string
     ) => {
+      await ensureMcpStartupApproved(config)
       if (mcpToolRequiresConfirmation(config.id, toolName)) {
         const resolvedCallId = callId ?? `${config.id}-${toolName}-${Date.now()}`
         const approved = await requestMcpConfirmation({
@@ -214,19 +247,51 @@ function registerMcpIpc(): void {
     }
   )
 
-  ipcMain.handle('mcp:listResources', (_event, configs: McpServerConfig[]) =>
-    listMcpResources(configs)
-  )
+  ipcMain.handle('mcp:listResources', async (_event, configs: McpServerConfig[]) => {
+    for (const config of configs) await ensureMcpStartupApproved(config)
+    return listMcpResources(configs)
+  })
 
   ipcMain.handle(
     'mcp:readResource',
-    (_event, config: McpServerConfig, uri: string, callId?: string) =>
-      readMcpResource(config, uri, callId)
+    async (_event, config: McpServerConfig, uri: string, callId?: string) => {
+      await ensureMcpStartupApproved(config)
+      return readMcpResource(config, uri, callId)
+    }
   )
 
-  ipcMain.handle('mcp:listPrompts', (_event, configs: McpServerConfig[]) =>
-    listMcpPrompts(configs)
-  )
+  ipcMain.handle('mcp:listPrompts', async (_event, configs: McpServerConfig[]) => {
+    for (const config of configs) await ensureMcpStartupApproved(config)
+    return listMcpPrompts(configs)
+  })
+  ipcMain.handle('mcp:getPrompt', async (_event, config: McpServerConfig, name: string, args: Record<string, string>) => {
+    await ensureMcpStartupApproved(config)
+    return getMcpPrompt(config, name, args)
+  })
+}
+
+function registerSapGuiIpc(): void {
+  const activeControls = new Map<string, AbortController>()
+  ipcMain.handle('sapGui:controlStatus', () => ({ version: 2 as const }))
+  ipcMain.handle('sapGui:readSettings', (_event, userId: string) => readSapWindowSettings(userId))
+  ipcMain.handle('sapGui:saveSettings', (_event, userId: string, value: SapWindowSettings) => saveSapWindowSettings(userId, value))
+  ipcMain.handle('sapGui:listSessions', () => scanSapWindows())
+  ipcMain.handle('sapGui:snapshot', (_event, userId: string) => captureSapWindow(userId))
+  ipcMain.handle('sapGui:control', async (_event, userId: string, action: SapControlAction, callId: string) => {
+    if (typeof callId !== 'string' || !/^sap-[a-z0-9-]{1,80}$/i.test(callId)) throw new Error('Identificador da ação SAP inválido.')
+    if (activeControls.has(callId)) throw new Error('Ação SAP duplicada.')
+    const controller = new AbortController()
+    activeControls.set(callId, controller)
+    try {
+      return await performSapControl(userId, action, (detail) => requestMcpConfirmation({
+        callId, kind: 'tool', serverName: 'SAP GUI', toolName: action.kind, detail
+      }), controller.signal)
+    } finally { activeControls.delete(callId) }
+  })
+  ipcMain.on('sapGui:cancelControl', (_event, callId: string) => {
+    activeControls.get(callId)?.abort()
+    resolveMcpConfirmation(callId, false)
+  })
 }
 
 app.whenReady().then(() => {
@@ -239,6 +304,7 @@ app.whenReady().then(() => {
   registerWindowControlIpc()
   registerDocumentIpc()
   registerMcpIpc()
+  registerSapGuiIpc()
   createWindow()
 
   if (mainWindow) {

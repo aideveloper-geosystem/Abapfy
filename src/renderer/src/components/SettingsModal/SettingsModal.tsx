@@ -4,6 +4,7 @@ import {
   Building2,
   Download,
   Palette,
+  Monitor,
   Server,
   SlidersHorizontal,
   Shield,
@@ -14,15 +15,17 @@ import { AiSection } from './AiSection'
 import { ParametrosSection } from './ParametrosSection'
 import { UpdatesSection } from './UpdatesSection'
 import { McpSection } from './McpSection'
+import { SapContextSection } from './SapContextSection'
 import { AdministrationSection } from './AdministrationSection'
 import './SettingsModal.css'
 
-type SectionId = 'general' | 'ai' | 'mcp' | 'parametros' | 'clients' | 'administration' | 'updates'
+type SectionId = 'general' | 'ai' | 'mcp' | 'sap-context' | 'parametros' | 'clients' | 'administration' | 'updates'
 
 const SECTIONS: { id: SectionId; label: string; icon: typeof Palette }[] = [
   { id: 'general', label: 'Geral', icon: Palette },
   { id: 'ai', label: 'Inteligência Artificial', icon: Bot },
   { id: 'mcp', label: 'MCP', icon: Server },
+  { id: 'sap-context', label: 'Contexto SAP', icon: Monitor },
   { id: 'parametros', label: 'Parâmetros', icon: SlidersHorizontal },
   { id: 'clients', label: 'Clientes', icon: Building2 },
   { id: 'administration', label: 'Administração', icon: Shield },
@@ -57,7 +60,7 @@ export function SettingsModal({
   return (
     <div className="settings-overlay" onMouseDown={onClose}>
       <div
-        className={`settings-modal ${activeSection === 'ai' || activeSection === 'parametros' || activeSection === 'mcp' || activeSection === 'administration' ? 'settings-modal-wide' : ''}`}
+        className={`settings-modal ${activeSection === 'ai' || activeSection === 'parametros' || activeSection === 'mcp' || activeSection === 'sap-context' || activeSection === 'administration' ? 'settings-modal-wide' : ''}`}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <nav className="settings-nav">
@@ -83,6 +86,7 @@ export function SettingsModal({
           {activeSection === 'general' && <GeneralSection />}
           {activeSection === 'ai' && <AiSection />}
           {activeSection === 'mcp' && <McpSection />}
+          {activeSection === 'sap-context' && <SapContextSection />}
           {activeSection === 'parametros' && <ParametrosSection />}
           {activeSection === 'clients' && (
             <div className="settings-section">

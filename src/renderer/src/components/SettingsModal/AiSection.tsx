@@ -3,29 +3,20 @@ import { Check, ExternalLink, KeyRound, Trash2 } from 'lucide-react'
 import { supabase } from '@renderer/lib/supabaseClient'
 import { useAuthStore } from '@renderer/store/authStore'
 import { useSettingsStore } from '@renderer/store/settingsStore'
-import { useAgentsStore } from '@renderer/store/agentsStore'
-import { useMcpStore, type McpServerItem } from '@renderer/store/mcpStore'
 import { AI_PROVIDERS, type AiProviderId } from '@renderer/lib/aiProviders'
 import { useAiModelsStore, type ManagedAiModel } from '@renderer/store/aiModelsStore'
 import './SettingsSections.css'
 
 interface AccessUser { user_id: string; display_name: string; email: string }
 interface KeyStatus { provider: AiProviderId; updated_at: string }
-interface ServerRow extends McpServerItem { user_id: string }
-interface BindingRow { id: string; server_id: string; agent_source: string; agent_id: string }
 
 export function AiSection(): JSX.Element {
   const { role, user } = useAuthStore()
   const canManage = role === 'MASTER' || role === 'ADMIN'
   const { apiKeys, defaultProvider, defaultModel, setDefaultModel, load: loadSettings } = useSettingsStore()
-  const agents = useAgentsStore((state) => state.agents)
-  const reloadOwnMcp = useMcpStore((state) => state.load)
   const [users, setUsers] = useState<AccessUser[]>([])
   const [targetId, setTargetId] = useState(user?.id ?? '')
   const [keys, setKeys] = useState<KeyStatus[]>([])
-  const [servers, setServers] = useState<ServerRow[]>([])
-  const [bindings, setBindings] = useState<BindingRow[]>([])
-  const [customAgents, setCustomAgents] = useState<{ id: string; name: string }[]>([])
   const [drafts, setDrafts] = useState<Record<AiProviderId, string>>({ openai: '', gemini: '', claude: '' })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -51,24 +42,16 @@ export function AiSection(): JSX.Element {
   useEffect(() => { void loadModels() }, [loadModels])
 
   async function refresh(target: string): Promise<void> {
-    const [keyResult, serverResult, bindingResult, customResult] = await Promise.all([
-      supabase.rpc('list_ai_key_status', { p_user_id: target }),
-      supabase.from('mcp_servers').select('*').eq('user_id', target).order('created_at'),
-      supabase.from('mcp_agent_bindings').select('id, server_id, agent_source, agent_id').eq('user_id', target),
-      supabase.rpc('list_ai_custom_agents', { p_user_id: target })
-    ])
-    const cause = keyResult.error ?? serverResult.error ?? bindingResult.error ?? customResult.error
+    const keyResult = await supabase.rpc('list_ai_key_status', { p_user_id: target })
+    const cause = keyResult.error
     if (cause) throw cause
     if (target !== targetRef.current) return
     setKeys((keyResult.data ?? []) as KeyStatus[])
-    setServers((serverResult.data ?? []) as ServerRow[])
-    setBindings((bindingResult.data ?? []) as BindingRow[])
-    setCustomAgents((customResult.data ?? []) as { id: string; name: string }[])
   }
 
   useEffect(() => {
     if (!canManage || !targetId) return
-    setKeys([]); setServers([]); setBindings([]); setCustomAgents([]); setDrafts({ openai: '', gemini: '', claude: '' })
+    setKeys([]); setDrafts({ openai: '', gemini: '', claude: '' })
     void refresh(targetId).catch((cause) => setError((cause as Error).message))
   }, [canManage, targetId])
 
@@ -78,7 +61,7 @@ export function AiSection(): JSX.Element {
       await task()
       await refresh(targetId)
       await loadModels()
-      if (ownTarget) { await loadSettings(); await reloadOwnMcp() }
+      if (ownTarget) await loadSettings()
     } catch (cause) { setError((cause as Error).message) }
     finally { setBusy(false) }
   }
@@ -96,16 +79,6 @@ export function AiSection(): JSX.Element {
     })
   }
 
-  async function addPreset(preset: 'sap_docs' | 'sap_abap'): Promise<void> {
-    await act(async () => {
-      const base = preset === 'sap_docs'
-        ? { slug: 'sap-docs', name: 'SAP Docs', description: 'Documentação SAP.', transport: 'streamable_http', url: 'http://mcp-sap-docs.marianzeis.de/mcp', command: null, args: [] }
-        : { slug: 'sap-abap', name: 'SAP ABAP', description: 'Acesso SAP via perfil local.', transport: 'stdio', url: null, command: navigator.userAgent.includes('Windows') ? 'npx.cmd' : 'npx', args: ['--yes', '--prefer-online', '@coaspe/sap-abap-mcp@latest', 'serve', '--profile', 'DEV100'] }
-      const { error: cause } = await supabase.from('mcp_servers').insert({ ...base, user_id: targetId, enabled: true })
-      if (cause) throw cause
-    })
-  }
-
   async function addModel(event: FormEvent): Promise<void> {
     event.preventDefault()
     const model = { ...modelDraft, model_id: modelDraft.model_id.trim(), label: modelDraft.label.trim(), description: modelDraft.description.trim() }
@@ -116,7 +89,7 @@ export function AiSection(): JSX.Element {
   return <div className="settings-section">
     <header className="settings-section-header">
       <h2>Inteligência Artificial</h2>
-      <p>{canManage ? 'Gerencie chaves de API e integrações para cada usuário.' : 'Consulte suas integrações e escolha o modelo de IA padrão.'}</p>
+      <p>{canManage ? 'Gerencie chaves de API e modelos para cada usuário. Integrações ficam na aba MCP.' : 'Consulte seus modelos de IA disponíveis.'}</p>
     </header>
     {canManage && <label className="settings-field-label">Usuário
       <select className="ai-provider-input" value={targetId} disabled={busy} onChange={(event) => setTargetId(event.target.value)}>
@@ -170,36 +143,6 @@ export function AiSection(): JSX.Element {
           <button type="button" className="ai-provider-remove" title="Remover modelo" disabled={busy} onClick={() => void act(() => removeModel(model.provider, model.model_id))}><Trash2 size={14} /></button>
         </div>
       })}
-    </div>}
-    {canManage && <div className="ai-integrations-panel"><h3>Integrações MCP</h3>
-      <div className="mcp-preset-actions">
-        <button type="button" className="mcp-preset-button" disabled={busy || servers.some((server) => server.slug === 'sap-docs')} onClick={() => void addPreset('sap_docs')}>Adicionar SAP Docs</button>
-        <button type="button" className="mcp-preset-button" disabled={busy || servers.some((server) => server.slug === 'sap-abap')} onClick={() => void addPreset('sap_abap')}>Adicionar SAP ABAP</button>
-      </div>
-      {servers.map((server) => <div key={server.id} className="mcp-server-card">
-        <div className="mcp-server-header"><strong>{server.name}</strong><label className="mcp-enabled-label">
-          <input type="checkbox" checked={server.enabled} disabled={busy} onChange={() => void act(async () => {
-            const { error: cause } = await supabase.from('mcp_servers').update({ enabled: !server.enabled }).eq('id', server.id).eq('user_id', targetId)
-            if (cause) throw cause
-          })} /> Ativo</label></div>
-        <span className="settings-muted">{server.transport === 'stdio' ? server.command : server.url}</span>
-        <div className="mcp-agent-grid">{[
-          ...agents.filter((agent) => agent.source === 'default'),
-          ...customAgents.map((agent) => ({ ...agent, source: 'custom' as const }))
-        ].map((agent) => {
-          const bound = bindings.some((binding) => binding.server_id === server.id && binding.agent_source === agent.source && binding.agent_id === agent.id)
-          return <label key={`${agent.source}:${agent.id}`} className="mcp-agent-option"><input type="checkbox" checked={bound} disabled={busy}
-            onChange={() => void act(async () => {
-              const query = bound
-                ? supabase.from('mcp_agent_bindings').delete().eq('user_id', targetId).eq('server_id', server.id).eq('agent_source', agent.source).eq('agent_id', agent.id)
-                : supabase.from('mcp_agent_bindings').insert({ user_id: targetId, server_id: server.id, agent_source: agent.source, agent_id: agent.id })
-              const { error: cause } = await query
-              if (cause) throw cause
-            })} /> {agent.name}</label>
-        })}</div>
-        <button type="button" className="ai-provider-remove" title="Remover integração" disabled={busy}
-          onClick={() => void act(async () => { const { error: cause } = await supabase.from('mcp_servers').delete().eq('id', server.id).eq('user_id', targetId); if (cause) throw cause })}><Trash2 size={14} /></button>
-      </div>)}
     </div>}
   </div>
 }

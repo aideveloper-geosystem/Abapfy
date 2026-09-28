@@ -59,6 +59,7 @@ function App(): JSX.Element {
       loadMcp()
       loadTasks()
     } else if (status === 'unauthenticated') {
+      void window.api.mcp.closeAll()
       resetSettings()
       resetSkills()
       resetAgents()

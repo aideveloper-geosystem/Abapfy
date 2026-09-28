@@ -81,6 +81,12 @@ interface McpConfirmationResolved {
 }
 
 const mcp = {
+  closeAll: () => ipcRenderer.invoke('mcp:closeAll'),
+  readLocalConfig: (userId: string) => ipcRenderer.invoke('mcp:readLocalConfig', userId),
+  saveLocalCatalog: (userId: string, catalog: unknown) => ipcRenderer.invoke('mcp:saveLocalCatalog', userId, catalog),
+  saveLocalServerConfig: (userId: string, serverId: string, config: unknown) =>
+    ipcRenderer.invoke('mcp:saveLocalServerConfig', userId, serverId, config),
+  pickDirectory: () => ipcRenderer.invoke('mcp:pickDirectory'),
   listTools: (configs: unknown[]) => ipcRenderer.invoke('mcp:listTools', configs),
   callTool: (config: unknown, toolName: string, args: Record<string, unknown>, callId?: string) =>
     ipcRenderer.invoke('mcp:callTool', config, toolName, args, callId),
@@ -91,6 +97,7 @@ const mcp = {
   readResource: (config: unknown, uri: string, callId?: string) =>
     ipcRenderer.invoke('mcp:readResource', config, uri, callId),
   listPrompts: (configs: unknown[]) => ipcRenderer.invoke('mcp:listPrompts', configs),
+  getPrompt: (config: unknown, name: string, args: Record<string, string>) => ipcRenderer.invoke('mcp:getPrompt', config, name, args),
   onConfirmationPending: (callback: (event: McpConfirmationPending) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: McpConfirmationPending): void =>
       callback(payload)
@@ -105,10 +112,21 @@ const mcp = {
   }
 }
 
+const sapGui = {
+  readSettings: (userId: string) => ipcRenderer.invoke('sapGui:readSettings', userId),
+  saveSettings: (userId: string, value: unknown) => ipcRenderer.invoke('sapGui:saveSettings', userId, value),
+  listSessions: () => ipcRenderer.invoke('sapGui:listSessions'),
+  snapshot: (userId: string) => ipcRenderer.invoke('sapGui:snapshot', userId),
+  controlStatus: () => ipcRenderer.invoke('sapGui:controlStatus'),
+  control: (userId: string, action: unknown, callId: string) => ipcRenderer.invoke('sapGui:control', userId, action, callId),
+  cancelControl: (callId: string) => ipcRenderer.send('sapGui:cancelControl', callId)
+}
+
 const api = {
   windowControls,
   updates,
   mcp,
+  sapGui,
   documents: {
     renderPdf: (html: string) => ipcRenderer.invoke('document:renderPdf', html) as Promise<string>
   }

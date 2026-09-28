@@ -41,6 +41,26 @@ export interface McpServerConfig {
   url: string | null
   command: string | null
   args: string[]
+  cwd?: string
+  env?: Record<string, string>
+  headers?: Record<string, string>
+}
+
+export interface McpLocalServerConfig {
+  cwd?: string
+  env?: Record<string, string>
+  headers?: Record<string, string>
+  disabledTools?: string[]
+  profile?: string
+}
+
+export interface McpLocalConfig {
+  version: 1
+  servers: Record<string, McpLocalServerConfig>
+  catalog: {
+    servers: Array<{ id: string; slug: string; name: string; transport: 'streamable_http' | 'stdio'; url: string | null; command: string | null; args: string[]; enabled: boolean }>
+    bindings: Array<{ serverId: string; agentSource: string; agentId: string; enabled: boolean }>
+  }
 }
 
 export interface McpToolInfo {
@@ -67,6 +87,7 @@ export interface McpPromptInfo {
   serverName: string
   name: string
   description: string | null
+  arguments: Array<{ name: string; description?: string; required?: boolean }>
 }
 
 export interface McpConfirmationPending {
@@ -83,6 +104,11 @@ export interface McpConfirmationResolved {
 }
 
 export interface McpApi {
+  closeAll: () => Promise<void>
+  readLocalConfig: (userId: string) => Promise<McpLocalConfig>
+  saveLocalCatalog: (userId: string, catalog: McpLocalConfig['catalog']) => Promise<McpLocalConfig>
+  saveLocalServerConfig: (userId: string, serverId: string, config: McpLocalServerConfig | null) => Promise<McpLocalConfig>
+  pickDirectory: () => Promise<string | null>
   listTools: (configs: McpServerConfig[]) => Promise<McpToolInfo[]>
   callTool: (
     config: McpServerConfig,
@@ -95,14 +121,62 @@ export interface McpApi {
   listResources: (configs: McpServerConfig[]) => Promise<McpResourceInfo[]>
   readResource: (config: McpServerConfig, uri: string, callId?: string) => Promise<unknown>
   listPrompts: (configs: McpServerConfig[]) => Promise<McpPromptInfo[]>
+  getPrompt: (config: McpServerConfig, name: string, args: Record<string, string>) => Promise<unknown>
   onConfirmationPending: (callback: (event: McpConfirmationPending) => void) => () => void
   onConfirmationResolved: (callback: (event: McpConfirmationResolved) => void) => () => void
+}
+
+export interface SapGuiSettings {
+  version: 1
+  enabled: boolean
+  sessionId: string | null
+  sessionIdentity: string | null
+  controlMode: 'off' | 'ask' | 'always'
+}
+
+export interface SapGuiControlAction {
+  kind: 'click' | 'type_text' | 'press_key'
+  x?: number
+  y?: number
+  text?: string
+  key?: 'TAB' | 'ENTER' | 'ESC' | 'BACKSPACE' | 'LEFT' | 'RIGHT' | 'UP' | 'DOWN'
+}
+
+export interface SapGuiSession {
+  id: string
+  title: string
+  processName: string
+  processId: number
+}
+
+export interface SapGuiScan {
+  windows: SapGuiSession[]
+  processCount: number
+  message: string
+}
+
+export interface SapGuiCapture {
+  window: SapGuiSession
+  imageDataUrl: string
+  width: number
+  height: number
+}
+
+export interface SapGuiApi {
+  readSettings: (userId: string) => Promise<SapGuiSettings>
+  saveSettings: (userId: string, value: SapGuiSettings) => Promise<SapGuiSettings>
+  listSessions: () => Promise<SapGuiScan>
+  snapshot: (userId: string) => Promise<SapGuiCapture>
+  controlStatus: () => Promise<{ version: 2 }>
+  control: (userId: string, action: SapGuiControlAction, callId: string) => Promise<string>
+  cancelControl: (callId: string) => void
 }
 
 export interface Api {
   windowControls: WindowControlsApi
   updates: UpdatesApi
   mcp: McpApi
+  sapGui: SapGuiApi
   documents: { renderPdf: (html: string) => Promise<string> }
 }
 

@@ -31,7 +31,8 @@ O aplicativo usa Supabase para autenticação e persistência, oferece provedore
 | **Conversas com IA** | Histórico persistente, respostas em streaming, anexos, seleção de modelo, agentes e skills, perguntas de esclarecimento e respostas estruturadas. |
 | **Contexto SAP** | Produto/release SAP por sessão, base de conhecimento do projeto, arquivos da pasta e referências recuperadas para apoiar as respostas. |
 | **Agentes e skills** | Catálogo de agentes SAP, importação de agentes e skills em Markdown, seleção automática de especialidade e skills relevantes. |
-| **MCP** | Servidores HTTP e `stdio`, vínculo com agentes, uso de ferramentas e recursos, cancelamento e confirmação no aplicativo para ações sensíveis. |
+| **MCP** | Gerenciador por usuário para servidores HTTP e `stdio`, catálogo SAP e geral, configurações locais protegidas, vínculo com agentes, seleção de ferramentas, diagnóstico e confirmação de ações sensíveis. |
+| **Contexto SAP GUI** | Captura visual e controle opcional da janela escolhida no Windows, com autorização por ação ou permissão local persistente, prévia, skill nativa e etapas visíveis no chat. |
 | **Projetos e tarefas** | Projetos com contexto próprio; quadro de tarefas com colunas configuráveis, subtarefas, prioridade, responsável e estimativas. |
 | **Documentos e métricas** | Geração de especificação funcional em `.docx` a partir do modelo incluído; estatísticas de uso pessoal. |
 | **Administração** | Papéis MASTER e ADMIN, convites e provisionamento de chaves de IA e integrações conforme as políticas do banco. |
@@ -126,7 +127,7 @@ As respostas geradas por IA exigem revisão humana, sobretudo antes de aplicar m
 | --- | --- | --- |
 | URL e chave `anon` do Supabase | `.env` local / segredos de build | Necessárias para desenvolver e empacotar. Use `.env.example` como modelo. |
 | Chaves dos provedores de IA | Configurações → Inteligência Artificial | A gravação e o provisionamento dependem das permissões MASTER/ADMIN da migração `025`. |
-| Servidores MCP | Configurações → Inteligência Artificial | Configuração e vínculos com agentes; ações de escrita exigem confirmação no aplicativo. |
+| Servidores MCP | Configurações → MCP | Catálogo e vínculos administrados; parâmetros locais por usuário em JSON protegido. Veja o [guia do gerenciador](docs/mcp-manager.md). |
 | Recuperação de senha | Painel do Supabase | Requer SMTP e o [template versionado](supabase/email-templates/README.md). |
 
 As políticas de RLS estão em [`supabase/rls/`](supabase/rls/). A instalação das políticas e funções é responsabilidade de quem administra o projeto Supabase. Consulte também a [nota sobre armazenamento de chaves de IA](supabase/README.md#ordem-de-execução) antes de usar um ambiente de produção.
@@ -156,6 +157,8 @@ Consulte o [changelog](CHANGELOG.md) para o histórico de versões. A marca atua
 
 - [Design system e diretrizes de interface](DESIGN.md)
 - [Banco de dados, RLS e ordem das migrações](supabase/README.md)
+- [Gerenciador MCP, parâmetros locais e diagnóstico](docs/mcp-manager.md)
+- [Contexto local da sessão SAP GUI](docs/sap-gui-context.md)
 - [Recuperação de senha por e-mail](supabase/email-templates/README.md)
 - [Dashboard administrativo web](external/README.md)
 - [Cenários manuais de teste](test-e2e/README.md)

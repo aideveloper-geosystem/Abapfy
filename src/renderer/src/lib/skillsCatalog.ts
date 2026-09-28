@@ -27,6 +27,13 @@ export const SKILL_CATEGORY_LABELS: Record<SkillCategory, string> = {
  */
 export const BUILTIN_SKILLS: BuiltinSkill[] = [
   {
+    slug: 'sap-gui-context',
+    name: 'Contexto visual SAP GUI',
+    category: 'tooling',
+    summary: 'Interpreta a captura da janela SAP GUI escolhida no computador.',
+    description: 'Use quando o contexto visual SAP estiver ativo e o usuário pedir ajuda com a transação ou tela atual. Interprete somente o que estiver legível na imagem e não afirme ter executado ações no SAP.'
+  },
+  {
     slug: 'sap-abap',
     name: 'SAP ABAP',
     category: 'abap',
