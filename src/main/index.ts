@@ -87,6 +87,32 @@ function registerWindowControlIpc(): void {
   })
 }
 
+function registerDocumentIpc(): void {
+  ipcMain.handle('document:renderPdf', async (_event, html: string): Promise<string> => {
+    if (typeof html !== 'string' || html.length > 2_000_000 || !html.startsWith('<!doctype html>')) {
+      throw new Error('Documento inválido ou grande demais para gerar o PDF.')
+    }
+    const printWindow = new BrowserWindow({
+      show: false,
+      webPreferences: { sandbox: true, nodeIntegration: false, contextIsolation: true, javascript: false }
+    })
+    printWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    try {
+      await printWindow.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(html, 'utf8').toString('base64')}`)
+      const pdf = await printWindow.webContents.printToPDF({
+        printBackground: true,
+        pageSize: 'A4',
+        displayHeaderFooter: true,
+        headerTemplate: '<span></span>',
+        footerTemplate: '<div style="width:100%;padding:0 18mm;color:#708898;font:9px Arial;text-align:right">Abapfy · DTec &nbsp; <span class="pageNumber"></span> / <span class="totalPages"></span></div>'
+      })
+      return pdf.toString('base64')
+    } finally {
+      printWindow.destroy()
+    }
+  })
+}
+
 // Dialog nativo (dialog.showMessageBox) é modal do SO: trava a IPC inteira
 // esperando clique e, se a janela estiver minimizada/fora de foco quando abre,
 // fica escondido atrás de outras janelas — o app parece travado sem motivo
@@ -211,6 +237,7 @@ app.whenReady().then(() => {
   })
 
   registerWindowControlIpc()
+  registerDocumentIpc()
   registerMcpIpc()
   createWindow()
 

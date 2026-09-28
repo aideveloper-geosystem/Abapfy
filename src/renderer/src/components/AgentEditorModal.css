@@ -1,0 +1,16 @@
+.agent-editor-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 18px; background: rgba(0,0,0,.72); }
+.agent-editor-modal { display: flex; flex-direction: column; width: min(100%, 780px); max-height: min(92vh, 900px); overflow: hidden; border: 1px solid var(--color-hairline); border-radius: var(--radius-lg); background: var(--color-surface-1); color: var(--color-ink); box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+.agent-editor-header { display: flex; justify-content: space-between; gap: 16px; padding: 20px 24px 12px; }
+.agent-editor-header h2 { font: 600 20px var(--font-display); margin: 0; }
+.agent-editor-header p { margin: 5px 0 0; color: var(--color-ink-subtle); font: 12px var(--font-text); }
+.agent-editor-header button { align-self: flex-start; color: var(--color-ink-subtle); }
+.agent-editor-modal form { display: flex; flex-direction: column; gap: 14px; min-height: 0; padding: 8px 24px 24px; overflow-y: auto; }
+.agent-editor-modal label { display: flex; flex-direction: column; gap: 6px; color: var(--color-ink-subtle); font: 12px var(--font-text); }
+.agent-editor-modal input, .agent-editor-modal textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); background: var(--color-surface-2); color: var(--color-ink); font: 13px var(--font-text); resize: vertical; }
+.agent-editor-modal input:focus, .agent-editor-modal textarea:focus { outline: 1px solid var(--color-primary); }
+.agent-editor-content { min-height: 260px; line-height: 1.5; font-family: var(--font-mono), monospace !important; }
+.agent-editor-error { margin: 0; color: var(--color-semantic-danger); font: 12px var(--font-text); }
+.agent-editor-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.agent-editor-actions button { padding: 9px 14px; border-radius: var(--radius-sm); color: var(--color-ink-subtle); font: 13px var(--font-text); }
+.agent-editor-actions button[type=submit] { background: var(--color-primary); color: var(--color-on-primary); }
+.agent-editor-actions button:disabled { opacity: .5; cursor: default; }

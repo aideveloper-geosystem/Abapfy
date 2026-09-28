@@ -3,6 +3,7 @@ import { AlertCircle, Bot, CheckCircle2, FileText, Loader2, RefreshCw, XCircle }
 import { Markdown } from './Markdown'
 import { EfDocxGenerator } from './EfDocxGenerator'
 import { StructuredJson } from './StructuredJson'
+import { DtecDocument } from './DtecDocument'
 import { EstimateScenarioCards } from './EstimateScenarioCards'
 import { ClarifyQuestion } from './ClarifyQuestion'
 import { formatDurationMs, formatTokenCount } from '@renderer/lib/format'
@@ -146,6 +147,8 @@ export const ChatMessageItem = memo(function ChatMessageItem({
             <EfDocxGenerator data={efDocx} />
           ) : estimate ? (
             <EstimateScenarioCards data={estimate} />
+          ) : structured && /dtec/i.test(message.agentName ?? '') ? (
+            <DtecDocument data={structured} />
           ) : structured ? (
             <StructuredJson data={structured} />
           ) : (

@@ -1,4 +1,4 @@
-import { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
   ArrowUp,
@@ -109,6 +109,7 @@ export function HomeScreen(): JSX.Element {
   const [driveActivity, setDriveActivity] = useState<WorkScope | null>(null)
   const [sessionPanelOpen, setSessionPanelOpen] = useState(false)
   const [input, setInput] = useState('')
+  const composerInputRef = useRef<HTMLTextAreaElement>(null)
   const [draftMessages, setDraftMessages] = useState<UiMessage[]>([])
   const [isRouting, setIsRouting] = useState(false)
   const [claudeEffort, setClaudeEffort] = useState<ClaudeEffort>('medium')
@@ -143,6 +144,12 @@ export function HomeScreen(): JSX.Element {
     () => (currentChatId ? (runtimeMessages ?? []) : draftMessages),
     [currentChatId, runtimeMessages, draftMessages]
   )
+  useLayoutEffect(() => {
+    const field = composerInputRef.current
+    if (!field) return
+    field.style.height = 'auto'
+    field.style.height = `${Math.min(field.scrollHeight, 240)}px`
+  }, [input, view])
 
   const profile = useAuthStore((state) => state.profile)
   const user = useAuthStore((state) => state.user)
@@ -429,11 +436,29 @@ export function HomeScreen(): JSX.Element {
       return
     }
 
+    const agentsRefreshed = await useAgentsStore.getState().load()
+    if (!agentsRefreshed) {
+      pushLocalError('Não foi possível confirmar quais agentes estão ativos. Tente novamente.')
+      return
+    }
+    const availableAgents = useAgentsStore.getState().agents.filter((item) => item.enabled)
+    const unavailableAgent = activeAgent ?? selectedAgent
+    if (unavailableAgent && !availableAgents.some((item) => item.source === unavailableAgent.source && item.id === unavailableAgent.id)) {
+      pushLocalError(`O agente ${unavailableAgent.name} foi desativado ou removido. Inicie uma nova sessão com outro agente.`)
+      return
+    }
+
     let folderReference: Awaited<ReturnType<typeof loadFolderReference>> | null = null
     if (selectedFolderId) {
       try {
         folderReference = await loadFolderReference(currentClientId, currentModuleId, selectedFolderId)
-        setFolderNotice(folderReference.limited ? 'Pasta grande: parte dos arquivos foi omitida do contexto desta mensagem.' : null)
+        setFolderNotice(folderReference.limited
+          ? `Contexto do drive limitado: ${folderReference.names.length} arquivo(s) encontrado(s); parte do conteúdo foi omitida. Divida a análise em pastas menores para obter a documentação completa.`
+          : `${folderReference.names.length} arquivo(s) do drive incluído(s) nesta mensagem.`)
+        if (folderReference.names.length === 0) {
+          pushLocalError('A pasta selecionada não contém arquivos para análise. Escolha outra pasta ou anexe os arquivos.')
+          return
+        }
       } catch (cause) {
         pushLocalError(`Não foi possível carregar a pasta do drive: ${(cause as Error).message}`)
         return
@@ -455,13 +480,14 @@ export function HomeScreen(): JSX.Element {
     )
     const selectedClient = clients.find((item) => item.id === currentClientId)
     const workbookContext = selectedClient?.workbookMd?.trim() || ''
-    const routingContent = workbookContext ? `${fullContent.slice(0, 4000)}\n\n${workbookContext}` : fullContent.slice(0, 4000)
+    const routingContent = `${fullContent.slice(0, 4000)}${folderReference ? `\n\n${folderReference.content.slice(0, 4000)}` : ''}${workbookContext ? `\n\n${workbookContext}` : ''}`
 
     const history: ChatTurn[] = messages
       .filter((message) => !message.error)
       .map((message) => ({ role: message.role, content: message.content }))
-    if (folderReference) history.push({ role: 'user', content: folderReference.content })
-    history.push({ role: 'user', content: fullContent })
+    history.push({ role: 'user', content: folderReference
+      ? `${fullContent}\n\n<contexto-drive>\n${folderReference.content}\n</contexto-drive>`
+      : fullContent })
 
     const userMessage: UiMessage = { id: createId(), role: 'user', content: fullContent }
     const nextDraftMessages = [...draftMessages, userMessage]
@@ -494,13 +520,13 @@ export function HomeScreen(): JSX.Element {
       }
 
       const manualAgent = selectedAgent
-        ? agents.find(
+        ? availableAgents.find(
             (item) => item.source === selectedAgent.source && item.id === selectedAgent.id
           )
         : undefined
       const projectAgent =
         currentProject?.defaultAgentSource && currentProject.defaultAgentId
-          ? agents.find(
+          ? availableAgents.find(
               (item) =>
                 item.source === currentProject.defaultAgentSource &&
                 item.id === currentProject.defaultAgentId
@@ -528,14 +554,14 @@ export function HomeScreen(): JSX.Element {
       } else if (projectAgent) {
         agent = { source: projectAgent.source, id: projectAgent.id, name: projectAgent.name }
         prompt = projectAgent.content
-      } else if (agents.length > 0) {
+      } else if (availableAgents.length > 0) {
         setIsRouting(true)
         const claudeKey = routerAllowed ? await fetchApiKey(user.id, 'claude') : null
         if (claudeKey) {
           const route = await routeConversation(
             claudeKey,
             routingContent,
-            agents.map((item) => ({ id: item.id, name: item.name, description: item.description })),
+            availableAgents.map((item) => ({ id: item.id, name: item.name, description: item.description })),
             enabledSkills.map((skill) => ({
               id: skill.slug,
               name: skill.name,
@@ -543,7 +569,7 @@ export function HomeScreen(): JSX.Element {
             }))
           )
           const routedAgent = route.agentId
-            ? agents.find((item) => item.id === route.agentId)
+            ? availableAgents.find((item) => item.id === route.agentId)
             : undefined
           if (routedAgent) {
             agent = { source: routedAgent.source, id: routedAgent.id, name: routedAgent.name }
@@ -657,11 +683,15 @@ export function HomeScreen(): JSX.Element {
     let totalOutputTokens = 0
     let iterationHistory = history
     let finished = false
+    let streamFailed = false
     let iteration = 0
     const startTime = performance.now()
     let runtimePrompt = prompt
     if (agent?.source === 'default' && agent.id === 'ef_consultant') {
       runtimePrompt = `${runtimePrompt}\n\n---\n\n${EF_DOCX_OUTPUT_CONTRACT}`
+    }
+    if (agent?.source === 'default' && agent.id === 'dtec_consultant') {
+      runtimePrompt = `${runtimePrompt ?? ''}\n\n---\n\n## Qualidade da DTec\nDescreva o fluxo completo em processing_logic, na ordem de execução, identificando rotinas, condições, consultas, transformações, integrações e saídas observáveis. Relacione cada comportamento aos arquivos e objetos fornecidos. Detalhe parâmetros, campos, tabelas, dependências e erros apenas quando comprovados pelo código. Se o contexto estiver incompleto ou truncado, declare expressamente a limitação no JSON e não afirme que o fluxo está completo. Mantenha o JSON válido conforme o contrato acima.`
     }
     if (agent?.source === 'default' && agent.id === 'effort_estimator' && user?.id) {
       const parametrosBlock = await fetchParametrosContextBlock(user.id)
@@ -756,6 +786,7 @@ export function HomeScreen(): JSX.Element {
       }
     } catch (error) {
       if ((error as Error).name !== 'AbortError') {
+        streamFailed = true
         rt.updateMessage(chatId, assistantId, { error: (error as Error).message })
       }
     } finally {
@@ -769,8 +800,10 @@ export function HomeScreen(): JSX.Element {
         renderFrame = null
       }
       const elapsedMs = performance.now() - startTime
+      const emptyResponse = !accumulated.trim() && !controller.signal.aborted && !streamFailed
       rt.updateMessage(chatId, assistantId, {
         content: accumulated,
+        ...(emptyResponse ? { error: 'O provedor encerrou a solicitação sem retornar conteúdo. Tente novamente com uma pasta menor ou verifique os limites do modelo.' } : {}),
         streaming: false,
         continuing: undefined,
         elapsedMs,
@@ -994,6 +1027,7 @@ export function HomeScreen(): JSX.Element {
             )}
 
             <textarea
+              ref={composerInputRef}
               className="home-composer-input"
               placeholder="Pergunte alguma coisa sobre SAP/ABAP…"
               rows={2}
@@ -1065,7 +1099,7 @@ export function HomeScreen(): JSX.Element {
                       <span>Automático</span>
                       <small>O Abapfy escolhe o agente ideal</small>
                     </button>
-                    {agents.map((agent) => (
+                    {agents.filter((agent) => agent.enabled).map((agent) => (
                       <button
                         key={`${agent.source}-${agent.id}`}
                         type="button"

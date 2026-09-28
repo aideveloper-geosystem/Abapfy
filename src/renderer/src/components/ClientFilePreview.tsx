@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import mammoth from 'mammoth'
-import * as pdfjsLib from 'pdfjs-dist'
-import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
+import pdfjsWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
 import { supabase } from '@renderer/lib/supabaseClient'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl

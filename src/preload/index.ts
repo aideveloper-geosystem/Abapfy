@@ -108,7 +108,10 @@ const mcp = {
 const api = {
   windowControls,
   updates,
-  mcp
+  mcp,
+  documents: {
+    renderPdf: (html: string) => ipcRenderer.invoke('document:renderPdf', html) as Promise<string>
+  }
 }
 
 if (process.contextIsolated) {

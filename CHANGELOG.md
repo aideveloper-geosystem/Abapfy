@@ -4,6 +4,30 @@ Todas as mudanças notáveis deste projeto serão documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.3.13] - 2026-09-28
+
+### Adicionado
+
+- O Dtec entrega documentação técnica em PDF com seções organizadas, visualização paginada no
+  aplicativo e opção de download.
+- MASTER e ADMIN podem editar nome, descrição e instruções dos agentes disponíveis na própria
+  conta e ativar ou desativar agentes padrão ou importados. A indisponibilidade é respeitada
+  no roteador, na escolha de novas sessões e nos envios de conversas anteriores.
+
+### Corrigido
+
+- O contexto escolhido no drive informa quantos arquivos foram incluídos e avisa quando o limite
+  omite parte do conteúdo; solicitações encerradas sem resposta exibem erro claro.
+- O streaming aceita separadores SSE com CRLF e informa erros enviados pelo provedor.
+- O campo de mensagem cresce com o texto e passa a rolar ao atingir a altura máxima.
+- A leitura de PDFs usa a distribuição compatível do PDF.js com o Electron; o visualizador do
+  Dtec abre em um modal amplo acima de toda a interface.
+
+### Configuração necessária
+
+- Aplicar `supabase/sql/031_agent_management.sql` após a migração 030 para persistir edição e
+  ativação de agentes por MASTER/ADMIN. Publicar os instaladores não executa SQL no Supabase.
+
 ## [0.3.12] - 2026-09-25
 
 ### Adicionado

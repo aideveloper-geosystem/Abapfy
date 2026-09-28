@@ -103,6 +103,7 @@ export interface Api {
   windowControls: WindowControlsApi
   updates: UpdatesApi
   mcp: McpApi
+  documents: { renderPdf: (html: string) => Promise<string> }
 }
 
 declare global {

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Bot, Download, Lock, Search, Trash2, Upload } from 'lucide-react'
+import { Bot, Download, Lock, Pencil, Power, Search, Trash2, Upload } from 'lucide-react'
 import { ImportAgentModal } from '@renderer/components/ImportAgentModal'
-import { useAgentsStore } from '@renderer/store/agentsStore'
+import { AgentEditorModal } from '@renderer/components/AgentEditorModal'
+import { useAgentsStore, type AgentItem } from '@renderer/store/agentsStore'
+import { useAuthStore } from '@renderer/store/authStore'
 import './SkillsScreen.css'
 import './AgentsScreen.css'
 
@@ -18,27 +20,47 @@ function downloadMarkdown(filename: string, content: string): void {
 export function AgentsScreen(): JSX.Element {
   const [search, setSearch] = useState('')
   const [importOpen, setImportOpen] = useState(false)
+  const [editingAgent, setEditingAgent] = useState<AgentItem | null>(null)
+  const [busyAgent, setBusyAgent] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const role = useAuthStore((state) => state.role)
+  const canManage = role === 'MASTER' || role === 'ADMIN'
 
-  const { agents, loaded, load, importAgent, removeCustomAgent } = useAgentsStore((state) => ({
+  const { agents, load, importAgent, removeCustomAgent, saveAgent, setAgentEnabled } = useAgentsStore((state) => ({
     agents: state.agents,
-    loaded: state.loaded,
     load: state.load,
     importAgent: state.importAgent,
-    removeCustomAgent: state.removeCustomAgent
+    removeCustomAgent: state.removeCustomAgent,
+    saveAgent: state.saveAgent,
+    setAgentEnabled: state.setAgentEnabled
   }))
 
   useEffect(() => {
-    if (!loaded) load()
-  }, [loaded, load])
+    void load()
+  }, [load])
 
   const filteredAgents = useMemo(() => {
     const query = search.trim().toLowerCase()
-    if (!query) return agents
-    return agents.filter(
+    const visible = canManage ? agents : agents.filter((agent) => agent.enabled)
+    if (!query) return visible
+    return visible.filter(
       (agent) =>
         agent.name.toLowerCase().includes(query) || agent.description.toLowerCase().includes(query)
     )
-  }, [agents, search])
+  }, [agents, search, canManage])
+
+  async function toggleAgent(agent: AgentItem): Promise<void> {
+    const key = `${agent.source}:${agent.id}`
+    setBusyAgent(key)
+    setActionError(null)
+    try {
+      await setAgentEnabled(agent, !agent.enabled)
+    } catch (cause) {
+      setActionError((cause as Error).message)
+    } finally {
+      setBusyAgent(null)
+    }
+  }
 
   return (
     <div className="skills-screen">
@@ -47,7 +69,7 @@ export function AgentsScreen(): JSX.Element {
           <h1 className="skills-title">Agentes</h1>
           <p className="skills-subtitle">
             Catálogo do harness — o roteador (Claude Haiku) ativa o agente ideal pra cada conversa.
-            Padrão não pode ser excluído; baixe pra copiar ou envie o seu.
+            Agentes padrão são compartilhados. MASTER e ADMIN podem editar e ativar ou desativar agentes.
           </p>
         </div>
         <button type="button" className="skills-import-btn" onClick={() => setImportOpen(true)}>
@@ -67,6 +89,7 @@ export function AgentsScreen(): JSX.Element {
           />
         </div>
       </div>
+      {actionError && <p className="agent-management-error" role="alert">{actionError}</p>}
 
       <div className="skills-grid">
         {filteredAgents.length === 0 ? (
@@ -76,7 +99,7 @@ export function AgentsScreen(): JSX.Element {
           </div>
         ) : (
           filteredAgents.map((agent) => (
-            <div key={`${agent.source}-${agent.id}`} className="skill-card agent-card">
+            <div key={`${agent.source}-${agent.id}`} className={`skill-card agent-card ${agent.enabled ? '' : 'agent-card-disabled'}`}>
               <div className="skill-card-header">
                 <div className="skill-card-title-row">
                   <span className="skill-card-name" title={agent.name}>
@@ -90,6 +113,7 @@ export function AgentsScreen(): JSX.Element {
                   ) : (
                     <span className="skill-card-custom-badge">Importado</span>
                   )}
+                  {!agent.enabled && <span className="agent-card-badge agent-card-badge-disabled">Desativado</span>}
                 </div>
               </div>
 
@@ -106,6 +130,10 @@ export function AgentsScreen(): JSX.Element {
                   <Download size={12} strokeWidth={1.75} />
                   Baixar .md
                 </button>
+                {canManage && <>
+                  <button type="button" className="agent-card-action" onClick={() => setEditingAgent(agent)}><Pencil size={12} strokeWidth={1.75} /> Editar</button>
+                  <button type="button" className="agent-card-action" disabled={busyAgent === `${agent.source}:${agent.id}`} onClick={() => void toggleAgent(agent)} aria-label={`${agent.enabled ? 'Desativar' : 'Ativar'} ${agent.name}`}><Power size={12} strokeWidth={1.75} /> {agent.enabled ? 'Desativar' : 'Ativar'}</button>
+                </>}
                 {agent.source === 'custom' && (
                   <button
                     type="button"
@@ -127,6 +155,7 @@ export function AgentsScreen(): JSX.Element {
         onClose={() => setImportOpen(false)}
         onImport={importAgent}
       />
+      {editingAgent && <AgentEditorModal key={`${editingAgent.source}:${editingAgent.id}`} agent={editingAgent} onClose={() => setEditingAgent(null)} onSave={(input) => saveAgent(editingAgent, input)} />}
     </div>
   )
 }

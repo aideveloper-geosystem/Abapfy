@@ -20,9 +20,15 @@
 
 .agent-card-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-sm);
   margin-top: 4px;
 }
+
+.agent-card-disabled { opacity: .72; }
+.agent-card-badge-disabled { color: var(--color-semantic-danger); background: var(--color-surface-2); }
+.agent-management-error { color: var(--color-semantic-danger); font: 12px var(--font-text); }
+.agent-card-action:disabled { opacity: .5; cursor: default; }
 
 .agent-card-action {
   display: inline-flex;

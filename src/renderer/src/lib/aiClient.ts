@@ -61,7 +61,7 @@ async function readSse(
   onEvent: (event: SseEvent) => void,
   signal: AbortSignal
 ): Promise<void> {
-  if (!response.body) return
+  if (!response.body) throw new Error('O provedor não retornou um fluxo de resposta.')
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
@@ -72,6 +72,7 @@ async function readSse(
     const { value, done } = await reader.read()
     if (done) break
     buffer += decoder.decode(value, { stream: true })
+    buffer = buffer.replace(/\r\n/g, '\n')
 
     let separatorIndex: number
     while ((separatorIndex = buffer.indexOf('\n\n')) !== -1) {
@@ -86,6 +87,10 @@ async function readSse(
       }
       if (dataLines.length) onEvent({ event, data: dataLines.join('\n') })
     }
+  }
+  if (buffer.trim()) {
+    const dataLines = buffer.split('\n').filter((line) => line.startsWith('data:'))
+    if (dataLines.length) onEvent({ data: dataLines.map((line) => line.slice(5).trim()).join('\n') })
   }
 }
 
@@ -230,6 +235,10 @@ async function streamClaude(args: StreamChatArgs): Promise<void> {
   await readSse(
     response,
     ({ event, data }) => {
+      if (event === 'error') {
+        const detail = JSON.parse(data)
+        throw new Error(`Claude: ${detail.error?.message ?? 'erro durante a geração da resposta'}`)
+      }
       try {
         const json = JSON.parse(data)
 

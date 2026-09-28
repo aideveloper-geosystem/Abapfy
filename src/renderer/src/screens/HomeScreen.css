@@ -321,6 +321,10 @@
 
 .home-composer-input {
   resize: none;
+  width: 100%;
+  min-height: 52px;
+  max-height: 240px;
+  overflow-y: auto;
   background: transparent;
   border: none;
   outline: none;

@@ -115,7 +115,7 @@ export function NewProjectModal({
               onChange={(event) => setAgentKey(event.target.value)}
             >
               <option value="">Nenhum — usar roteador automático</option>
-              {agents.map((agent) => (
+              {agents.filter((agent) => agent.enabled).map((agent) => (
                 <option key={`${agent.source}-${agent.id}`} value={`${agent.source}::${agent.id}`}>
                   {agent.name} {agent.source === 'custom' ? '(importado)' : ''}
                 </option>
