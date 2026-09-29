@@ -4,6 +4,27 @@ Todas as mudanças notáveis deste projeto serão documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [0.3.15] - 2026-09-29
+
+### Adicionado
+
+- Suporte aos modelos Claude Opus 5.5 e Sonnet 5.5 (migração `032`): thinking adaptativo sempre ativo, effort enviado explicitamente, novo nível de effort "Máximo" e fallback automático do servidor quando o modelo recusa por política de segurança.
+- Animação "Pensando" durante o raciocínio do Claude, com contador e resumo recolhido em "Pensou por Xs", aberto somente ao clicar; o resumo fica salvo com a mensagem (migração `033`).
+- Pesquisa web restrita à documentação SAP e leitura de links colados na conversa, com atividade no chat e fontes citadas ao fim da resposta.
+- Painel de Inteligência Artificial redesenhado, com resumo e abas para provedores, comportamento, ferramentas e catálogo. Effort padrão, exibição do raciocínio e ferramentas cobradas à parte são configurados por usuário (migração `034`); as ferramentas pagas vêm desligadas por padrão.
+- Verificação automática de atualizações ao abrir o app e a cada 4 horas, com aviso para baixar e reiniciar sem passar por Configurações → Atualizações.
+
+### Alterado
+
+- Cache de prompt automático nas chamadas ao Claude, reaproveitando agente, skills e histórico entre mensagens da mesma conversa e entre rodadas dos loops de ferramentas.
+- A ação de controle do SAP GUI usa validação estrita de schema no Claude.
+
+### Corrigido
+
+- Modelos Claude legados (como Haiku 4.5) não recebem mais parâmetros de thinking e effort que eles não aceitam.
+- Recusas do Claude aparecem como aviso legível no chat e no controle SAP, em vez de encerrar a resposta em silêncio.
+- Os loops de ferramentas dos modelos 5.5 reservam espaço para o raciocínio antes da chamada da ferramenta.
+
 ## [0.3.14] - 2026-09-28
 
 ### Adicionado
