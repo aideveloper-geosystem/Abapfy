@@ -1,5 +1,12 @@
 import { supabase } from '@renderer/lib/supabaseClient'
 import type { AiProviderId } from '@renderer/lib/aiProviders'
+import {
+  ANTHROPIC_API_URL,
+  claudeHeaders,
+  claudeModelParams,
+  claudeRefusalMessage,
+  claudeWebTools
+} from '@renderer/lib/claudeModels'
 
 export interface ChatTurn {
   role: 'user' | 'assistant'
@@ -14,14 +21,15 @@ function pngBase64(turn: { role: string; imageDataUrl?: string }): string | null
   return data.length <= 8 * 1024 * 1024 && /^[A-Za-z0-9+/=]+$/.test(data) ? data : null
 }
 
-export const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh'] as const
+export const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 export type ClaudeEffort = (typeof CLAUDE_EFFORT_LEVELS)[number]
 
 export const CLAUDE_EFFORT_LABELS_PT: Record<ClaudeEffort, string> = {
   low: 'Baixo',
   medium: 'Médio',
   high: 'Alto',
-  xhigh: 'Máximo'
+  xhigh: 'Muito alto',
+  max: 'Máximo'
 }
 
 export const ROUTER_MODEL = 'claude-haiku-4-5-20251001'
@@ -45,6 +53,80 @@ interface StreamChatArgs {
   signal: AbortSignal
   /** Só se aplica ao provedor Claude — controla o output_config.effort (adaptive thinking). */
   claudeEffort?: ClaudeEffort
+  /**
+   * Só Claude: ciclo de vida dos blocos de thinking. `start`/`stop` delimitam cada
+   * bloco (é o que dirige a animação "Pensando…"); `delta` traz o resumo legível.
+   */
+  onThinking?: (event: ThinkingEvent) => void
+  /** Só Claude: pede o resumo do raciocínio (display "summarized") para o onThinking. */
+  claudeShowThinking?: boolean
+  /** Só Claude: server tools cobradas à parte — pesquisa web (domínios SAP) e leitura de links. */
+  claudeWebSearch?: boolean
+  claudeWebFetch?: boolean
+  /** Só Claude: chamadas/resultados das server tools e citações das fontes. */
+  onServerTool?: (event: ServerToolEvent) => void
+}
+
+export type ThinkingEvent = { type: 'start' } | { type: 'delta'; text: string } | { type: 'stop' }
+
+export type ServerToolEvent =
+  | { type: 'call'; id: string; name: 'web_search' | 'web_fetch' | string; query?: string; url?: string }
+  | { type: 'result'; id: string; ok: boolean; detail?: string }
+  | { type: 'citation'; url: string; title: string }
+
+interface ClaudeStreamEventJson {
+  index: number
+  content_block?: { type?: string; id?: string; name?: string; tool_use_id?: string; content?: unknown }
+  delta?: { type?: string; partial_json?: string; citation?: { url?: unknown; title?: string } }
+}
+
+function handleClaudeServerToolEvent(
+  event: string | undefined,
+  json: ClaudeStreamEventJson,
+  calls: Map<number, { id: string; name: string; json: string }>,
+  emit: (event: ServerToolEvent) => void
+): void {
+  const block = json.content_block
+  if (event === 'content_block_start' && block?.type === 'server_tool_use') {
+    calls.set(json.index, { id: block.id ?? '', name: block.name ?? '', json: '' })
+    return
+  }
+  if (event === 'content_block_delta' && json.delta?.type === 'input_json_delta') {
+    const call = calls.get(json.index)
+    if (call) call.json += json.delta.partial_json ?? ''
+    return
+  }
+  if (event === 'content_block_delta' && json.delta?.type === 'citations_delta') {
+    const citation = json.delta.citation
+    if (typeof citation?.url === 'string') emit({ type: 'citation', url: citation.url, title: citation.title || citation.url })
+    return
+  }
+  if (event === 'content_block_stop' && calls.has(json.index)) {
+    const call = calls.get(json.index)!
+    calls.delete(json.index)
+    let input: { query?: string; url?: string } = {}
+    try {
+      input = JSON.parse(call.json || '{}')
+    } catch {
+      // input parcial — o evento sai sem query/url
+    }
+    emit({ type: 'call', id: call.id, name: call.name, query: input.query, url: input.url })
+    return
+  }
+  if (event === 'content_block_start' && (block?.type === 'web_search_tool_result' || block?.type === 'web_fetch_tool_result')) {
+    // Sucesso da busca: content é lista; erro (qualquer tool): objeto com error_code.
+    const content = block.content
+    const errorCode =
+      content && !Array.isArray(content) && typeof (content as { error_code?: unknown }).error_code === 'string'
+        ? (content as { error_code: string }).error_code
+        : null
+    const detail = errorCode
+      ? errorCode
+      : Array.isArray(content)
+        ? `${content.length} resultado${content.length === 1 ? '' : 's'}`
+        : undefined
+    emit({ type: 'result', id: block.tool_use_id ?? '', ok: !errorCode, detail })
+  }
 }
 
 export async function fetchApiKey(userId: string, provider: AiProviderId): Promise<string | null> {
@@ -219,30 +301,42 @@ async function streamGemini(args: StreamChatArgs): Promise<void> {
 }
 
 async function streamClaude(args: StreamChatArgs): Promise<void> {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    signal: args.signal,
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': args.apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: args.model,
-      max_tokens: 16000,
-      stream: true,
-      thinking: { type: 'adaptive' },
-      output_config: { effort: args.claudeEffort ?? 'medium' },
-      ...(args.systemPrompt ? { system: args.systemPrompt } : {}),
-      messages: args.messages.map((turn) => {
-        const image = pngBase64(turn)
-        return { role: turn.role, content: image
-          ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: image } }, { type: 'text', text: turn.content }]
-          : turn.content }
+  const webTools = claudeWebTools(args.model, {
+    search: Boolean(args.claudeWebSearch),
+    fetch: Boolean(args.claudeWebFetch)
+  })
+  const request = (tools: Record<string, unknown>[] | null): Promise<Response> =>
+    fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      signal: args.signal,
+      headers: claudeHeaders(args.apiKey, args.model),
+      body: JSON.stringify({
+        ...claudeModelParams(args.model, {
+          effort: args.claudeEffort ?? 'medium',
+          showThinking: Boolean(args.claudeShowThinking),
+          maxTokens: 16000,
+          thinkingMaxTokens: 32000
+        }),
+        stream: true,
+        ...(tools ? { tools } : {}),
+        ...(args.systemPrompt ? { system: args.systemPrompt } : {}),
+        messages: args.messages.map((turn) => {
+          const image = pngBase64(turn)
+          return { role: turn.role, content: image
+            ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: image } }, { type: 'text', text: turn.content }]
+            : turn.content }
+        })
       })
     })
-  })
+
+  let response = await request(webTools)
+  if (!response.ok && webTools && response.status === 400) {
+    // Organização sem pesquisa web habilitada no Console (ou tool indisponível):
+    // a resposta não pode falhar por isso — refaz sem as server tools.
+    const detail = await response.text()
+    if (!/web_(search|fetch)/i.test(detail)) throw new Error(`Claude ${response.status}: ${detail}`)
+    response = await request(null)
+  }
 
   if (!response.ok) {
     throw new Error(`Claude ${response.status}: ${await response.text()}`)
@@ -251,6 +345,9 @@ async function streamClaude(args: StreamChatArgs): Promise<void> {
   let reason: FinishReason = 'stop'
   let inputTokens: number | null = null
   let outputTokens: number | null = null
+  const openThinkingBlocks = new Set<number>()
+  // server_tool_use: o input chega em pedaços (input_json_delta) até o content_block_stop.
+  const serverToolCalls = new Map<number, { id: string; name: string; json: string }>()
 
   await readSse(
     response,
@@ -262,21 +359,52 @@ async function streamClaude(args: StreamChatArgs): Promise<void> {
       try {
         const json = JSON.parse(data)
 
-        if (event === 'content_block_delta') {
-          const text = json.delta?.text
-          if (typeof text === 'string') args.onDelta(text)
+        // text_delta é a resposta; thinking_delta é o resumo do raciocínio, entregue à
+        // parte. Blocos "fallback" do roteamento server-side e signature_delta são ignorados.
+        if (event === 'content_block_start' && json.content_block?.type === 'thinking') {
+          openThinkingBlocks.add(json.index)
+          args.onThinking?.({ type: 'start' })
         }
 
+        if (event === 'content_block_delta') {
+          if (json.delta?.type === 'text_delta' && typeof json.delta.text === 'string') {
+            args.onDelta(json.delta.text)
+          } else if (json.delta?.type === 'thinking_delta' && typeof json.delta.thinking === 'string') {
+            args.onThinking?.({ type: 'delta', text: json.delta.thinking })
+          }
+        }
+
+        if (event === 'content_block_stop' && openThinkingBlocks.delete(json.index)) {
+          args.onThinking?.({ type: 'stop' })
+        }
+
+        if (args.onServerTool) handleClaudeServerToolEvent(event, json, serverToolCalls, args.onServerTool)
+
         if (event === 'message_start') {
-          inputTokens = json.message?.usage?.input_tokens ?? inputTokens
-          outputTokens = json.message?.usage?.output_tokens ?? outputTokens
+          // Com prompt caching, input_tokens conta só a parte fora do cache; somamos
+          // leitura e escrita de cache para as estatísticas refletirem o contexto enviado.
+          const usage = json.message?.usage
+          if (usage) {
+            inputTokens =
+              (usage.input_tokens ?? 0) +
+              (usage.cache_read_input_tokens ?? 0) +
+              (usage.cache_creation_input_tokens ?? 0)
+          }
+          outputTokens = usage?.output_tokens ?? outputTokens
         }
 
         if (event === 'message_delta') {
           outputTokens = json.usage?.output_tokens ?? outputTokens
           const stopReason = json.delta?.stop_reason
-          if (stopReason === 'max_tokens') reason = 'length'
-          else if (stopReason && stopReason !== 'end_turn' && stopReason !== 'stop_sequence') {
+          // pause_turn: o loop server-side (pesquisa web) atingiu o limite de iterações.
+          // Tratado como continuação — o chamador reenvia o texto parcial e pede para seguir.
+          if (stopReason === 'max_tokens' || stopReason === 'pause_turn') reason = 'length'
+          else if (stopReason === 'refusal') {
+            reason = 'other'
+            args.onDelta(`
+
+> ${claudeRefusalMessage(json.delta?.stop_details?.category)}`)
+          } else if (stopReason && stopReason !== 'end_turn' && stopReason !== 'stop_sequence') {
             reason = 'other'
           }
         }

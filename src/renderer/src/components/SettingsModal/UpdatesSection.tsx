@@ -35,6 +35,13 @@ export function UpdatesSection(): JSX.Element {
 
   useEffect(() => {
     window.api.updates.getVersion().then(setCurrentVersion)
+    // A checagem automática pode ter rodado antes desta tela abrir.
+    window.api.updates.getState().then((snapshot) => {
+      setStatus(snapshot.status)
+      setLatest(snapshot.latest)
+      setProgress(snapshot.progress)
+      setErrorMessage(snapshot.error)
+    })
 
     const unsubscribers = [
       window.api.updates.onChecking(() => {

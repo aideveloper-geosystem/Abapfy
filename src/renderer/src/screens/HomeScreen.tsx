@@ -3,11 +3,11 @@ import {
   AlertCircle,
   ArrowUp,
   Bot,
+  Building2,
   ChevronDown,
   FileText,
-  FolderOpen,
   FolderKanban,
-  Building2,
+  FolderOpen,
   Layers3,
   Loader2,
   Mic,
@@ -83,6 +83,15 @@ function formatFileSize(bytes: number): string {
 }
 
 const MAX_CONTINUATIONS = 6
+
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return null
+  }
+}
+
 const CONTINUE_NUDGE =
   'Continue exatamente de onde parou. Não repita nada do que já foi enviado e não adicione introduções como "continuando" — apenas prossiga o conteúdo até concluir por completo.'
 
@@ -176,12 +185,18 @@ export function HomeScreen(): JSX.Element {
       setCurrentModuleId(modules[0].id)
     }
   }, [clients, modules, currentChatId, currentClientId])
-  const { apiKeys, defaultProvider, defaultModel, setDefaultModel } = useSettingsStore((state) => ({
+  const { apiKeys, defaultProvider, defaultModel, setDefaultModel, aiPreferences } = useSettingsStore((state) => ({
     apiKeys: state.apiKeys,
     defaultProvider: state.defaultProvider,
     defaultModel: state.defaultModel,
-    setDefaultModel: state.setDefaultModel
+    setDefaultModel: state.setDefaultModel,
+    aiPreferences: state.aiPreferences
   }))
+  // Effort do composer parte do padrão escolhido em Configurações → IA.
+  useEffect(() => {
+    setClaudeEffort(aiPreferences.defaultEffort)
+  }, [aiPreferences.defaultEffort])
+
   const agents = useAgentsStore((state) => state.agents)
   const skills = useSkillsStore((state) => state.skills)
   const configsForAgent = useMcpStore((state) => state.configsForAgent)
@@ -353,7 +368,9 @@ export function HomeScreen(): JSX.Element {
           agentName: row.role === 'assistant' ? (meta?.agentName ?? undefined) : undefined,
           providerLabel: row.role === 'assistant' ? providerName : undefined,
           modelLabel: row.role === 'assistant' ? (meta?.model ?? undefined) : undefined,
-          toolActivity: row.toolActivity ?? undefined
+          toolActivity: row.toolActivity ?? undefined,
+          thinkingText: row.thinking?.text || undefined,
+          thinkingMs: row.thinking?.ms ?? undefined
         }))
       )
     }
@@ -673,12 +690,35 @@ export function HomeScreen(): JSX.Element {
     // dentro do mesmo frame num único setState via requestAnimationFrame, o
     // texto continua chegando na mesma velocidade, só o repaint é agrupado.
     let renderFrame: number | null = null
+    // Thinking (Claude): o resumo chega em deltas como o texto e usa o mesmo frame.
+    let thinkingText = ''
+    let thinkingMs = 0
+    let thinkingSince: number | null = null
+    let sawThinking = false
+    const scheduleRender = (): void => {
+      if (renderFrame !== null) return
+      renderFrame = requestAnimationFrame(() => {
+        renderFrame = null
+        rt.updateMessage(chatId, assistantId, {
+          content: accumulated,
+          ...(sawThinking ? { thinkingText } : {})
+        })
+      })
+    }
     const flushContent = (): void => {
       if (renderFrame !== null) {
         cancelAnimationFrame(renderFrame)
         renderFrame = null
       }
-      rt.updateMessage(chatId, assistantId, { content: accumulated })
+      rt.updateMessage(chatId, assistantId, {
+        content: accumulated,
+        ...(sawThinking ? { thinkingText } : {})
+      })
+    }
+    const closeThinking = (): void => {
+      if (thinkingSince === null) return
+      thinkingMs += Date.now() - thinkingSince
+      thinkingSince = null
     }
     let totalInputTokens = 0
     let totalOutputTokens = 0
@@ -833,14 +873,49 @@ export function HomeScreen(): JSX.Element {
           systemPrompt: runtimePrompt ?? undefined,
           signal: controller.signal,
           claudeEffort: defaultProvider === 'claude' ? claudeEffort : undefined,
+          claudeShowThinking: aiPreferences.showThinking,
+          claudeWebSearch: aiPreferences.webSearch,
+          claudeWebFetch: aiPreferences.webFetch,
+          onServerTool: (event) => {
+            if (event.type === 'call') {
+              const target = event.url ? hostOf(event.url) : null
+              const label = event.name === 'web_fetch'
+                ? `Lendo ${target ?? 'página'}`
+                : `Pesquisa SAP · ${event.query ?? '…'}`
+              toolActivity.push({ id: `web-${event.id}`, label, kind: 'web', status: 'running', url: event.url })
+            } else if (event.type === 'result') {
+              const item = toolActivity.find((entry) => entry.id === `web-${event.id}`)
+              if (!item) return
+              item.status = event.ok ? 'done' : 'error'
+              if (event.detail) item.label = `${item.label} · ${event.ok ? event.detail : `falhou (${event.detail})`}`
+            } else {
+              const id = `source-${event.url}`
+              if (toolActivity.some((entry) => entry.id === id)) return
+              toolActivity.push({ id, label: event.title, kind: 'source', status: 'done', url: event.url })
+            }
+            pushToolActivity()
+          },
           onDelta: (delta) => {
             accumulated += delta
-            if (renderFrame === null) {
-              renderFrame = requestAnimationFrame(() => {
-                renderFrame = null
-                rt.updateMessage(chatId, assistantId, { content: accumulated })
-              })
+            scheduleRender()
+          },
+          onThinking: (event) => {
+            if (event.type === 'delta') {
+              thinkingText += event.text
+              scheduleRender()
+              return
             }
+            if (event.type === 'start') {
+              sawThinking = true
+              thinkingSince = Date.now()
+            } else {
+              closeThinking()
+            }
+            rt.updateMessage(chatId, assistantId, {
+              thinkingSince: thinkingSince ?? undefined,
+              thinkingMs,
+              thinkingText
+            })
           },
           onFinish: (info) => {
             finishInfo = info
@@ -880,12 +955,15 @@ export function HomeScreen(): JSX.Element {
         renderFrame = null
       }
       const elapsedMs = performance.now() - startTime
+      // Stream cancelado ou com erro no meio do thinking não recebe content_block_stop.
+      closeThinking()
       const emptyResponse = !accumulated.trim() && !controller.signal.aborted && !streamFailed
       rt.updateMessage(chatId, assistantId, {
         content: accumulated,
         ...(emptyResponse ? { error: 'O provedor encerrou a solicitação sem retornar conteúdo. Tente novamente com uma pasta menor ou verifique os limites do modelo.' } : {}),
         streaming: false,
         continuing: undefined,
+        ...(sawThinking ? { thinkingSince: undefined, thinkingMs, thinkingText } : {}),
         elapsedMs,
         tokensInput: totalInputTokens || undefined,
         tokensOutput: totalOutputTokens || undefined
@@ -901,7 +979,8 @@ export function HomeScreen(): JSX.Element {
           tokensInput: totalInputTokens || null,
           tokensOutput: totalOutputTokens || null,
           responseMs: Math.round(elapsedMs),
-          toolActivity: toolActivity.length > 0 ? toolActivity : null
+          toolActivity: toolActivity.length > 0 ? toolActivity : null,
+          thinking: sawThinking ? { text: thinkingText, ms: Math.round(thinkingMs) } : null
         })
       }
     }

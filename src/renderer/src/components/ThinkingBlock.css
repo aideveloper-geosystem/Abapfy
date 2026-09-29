@@ -1,0 +1,120 @@
+.thinking-block {
+  margin-bottom: var(--space-xs);
+}
+
+.thinking-block-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-family: var(--font-text);
+  font-size: 12px;
+  color: var(--color-ink-tertiary);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.thinking-block-toggle:not(:disabled):hover {
+  color: var(--color-ink);
+  background: var(--color-surface-2);
+}
+
+.thinking-block-toggle:disabled {
+  cursor: default;
+}
+
+.thinking-block-chevron {
+  transition: transform 0.18s ease;
+}
+
+.thinking-block-chevron-open {
+  transform: rotate(90deg);
+}
+
+.thinking-block-timer {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+/* Brilho que atravessa o texto "Pensando", como no Claude web. */
+.thinking-block-active .thinking-block-label {
+  background: linear-gradient(
+    90deg,
+    var(--color-ink-tertiary) 0%,
+    var(--color-ink-tertiary) 35%,
+    var(--color-ink) 50%,
+    var(--color-ink-tertiary) 65%,
+    var(--color-ink-tertiary) 100%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: thinking-shimmer 1.8s linear infinite;
+}
+
+.thinking-block-active .thinking-block-icon {
+  color: var(--color-primary-hover);
+  animation: thinking-pulse 1.6s ease-in-out infinite;
+}
+
+.thinking-block-text {
+  margin: 4px 0 var(--space-xs) 10px;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--color-hairline-strong);
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-text);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-ink-muted);
+  animation: thinking-text-in 160ms ease;
+}
+
+@keyframes thinking-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+
+@keyframes thinking-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes thinking-text-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-block-active .thinking-block-label,
+  .thinking-block-active .thinking-block-icon,
+  .thinking-block-text {
+    animation: none;
+  }
+  .thinking-block-active .thinking-block-label {
+    color: var(--color-ink-tertiary);
+  }
+}

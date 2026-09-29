@@ -27,8 +27,16 @@ interface UpdateProgressInfo {
   total: number
 }
 
+interface UpdateState {
+  status: 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'downloaded' | 'error'
+  latest: UpdateAvailableInfo | null
+  progress: UpdateProgressInfo | null
+  error: string | null
+}
+
 const updates = {
   getVersion: () => ipcRenderer.invoke('updates:getVersion') as Promise<string>,
+  getState: () => ipcRenderer.invoke('updates:getState') as Promise<UpdateState>,
   check: () => ipcRenderer.invoke('updates:check'),
   download: () => ipcRenderer.invoke('updates:download'),
   install: () => ipcRenderer.invoke('updates:install'),

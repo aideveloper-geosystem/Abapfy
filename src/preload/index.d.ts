@@ -21,8 +21,25 @@ export interface UpdateProgressInfo {
   total: number
 }
 
+export type UpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'up-to-date'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error'
+
+export interface UpdateState {
+  status: UpdateStatus
+  latest: UpdateAvailableInfo | null
+  progress: UpdateProgressInfo | null
+  error: string | null
+}
+
 export interface UpdatesApi {
   getVersion: () => Promise<string>
+  getState: () => Promise<UpdateState>
   check: () => Promise<void>
   download: () => Promise<void>
   install: () => Promise<void>

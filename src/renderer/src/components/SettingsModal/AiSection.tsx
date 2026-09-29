@@ -1,19 +1,23 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { Check, ExternalLink, KeyRound, Trash2 } from 'lucide-react'
+import { AiBehaviorPanel, AiToolsPanel } from './AiPreferencesPanels'
 import { supabase } from '@renderer/lib/supabaseClient'
 import { useAuthStore } from '@renderer/store/authStore'
 import { useSettingsStore } from '@renderer/store/settingsStore'
 import { AI_PROVIDERS, type AiProviderId } from '@renderer/lib/aiProviders'
+import { CLAUDE_EFFORT_LABELS_PT } from '@renderer/lib/aiClient'
 import { useAiModelsStore, type ManagedAiModel } from '@renderer/store/aiModelsStore'
 import './SettingsSections.css'
 
 interface AccessUser { user_id: string; display_name: string; email: string }
 interface KeyStatus { provider: AiProviderId; updated_at: string }
+type AiTab = 'providers' | 'behavior' | 'tools' | 'catalog'
 
 export function AiSection(): JSX.Element {
   const { role, user } = useAuthStore()
   const canManage = role === 'MASTER' || role === 'ADMIN'
-  const { apiKeys, defaultProvider, defaultModel, setDefaultModel, load: loadSettings } = useSettingsStore()
+  const { apiKeys, defaultProvider, defaultModel, setDefaultModel, aiPreferences, load: loadSettings } = useSettingsStore()
+  const [tab, setTab] = useState<AiTab>('providers')
   const [users, setUsers] = useState<AccessUser[]>([])
   const [targetId, setTargetId] = useState(user?.id ?? '')
   const [keys, setKeys] = useState<KeyStatus[]>([])
@@ -86,18 +90,59 @@ export function AiSection(): JSX.Element {
     await act(async () => { await saveModel(model); setModelDraft({ provider: model.provider, model_id: '', label: '', description: '', enabled: true }); setEditingModel(false) })
   }
 
-  return <div className="settings-section">
+  // Resumo sempre do próprio usuário, mesmo quando um admin gerencia outra conta.
+  const connectedCount = AI_PROVIDERS.filter((provider) => apiKeys[provider.id]?.configured).length
+  const defaultModelLabel = models.find((model) => model.provider === defaultProvider && model.model_id === defaultModel)?.label
+    ?? defaultModel ?? 'Nenhum'
+  const paidTools = [aiPreferences.webSearch && 'Pesquisa web', aiPreferences.webFetch && 'Leitura de links'].filter(Boolean)
+  const tabs: { id: AiTab; label: string }[] = [
+    { id: 'providers', label: 'Provedores e modelos' },
+    { id: 'behavior', label: 'Comportamento' },
+    { id: 'tools', label: 'Ferramentas' },
+    ...(canManage ? [{ id: 'catalog' as const, label: 'Catálogo' }] : [])
+  ]
+
+  return <div className="settings-section settings-section-ai">
     <header className="settings-section-header">
       <h2>Inteligência Artificial</h2>
-      <p>{canManage ? 'Gerencie chaves de API e modelos para cada usuário. Integrações ficam na aba MCP.' : 'Consulte seus modelos de IA disponíveis.'}</p>
+      <p>Provedores, modelo padrão, como o Claude raciocina e quais ferramentas pagas ele pode usar. Integrações MCP ficam na aba MCP.</p>
     </header>
-    {canManage && <label className="settings-field-label">Usuário
-      <select className="ai-provider-input" value={targetId} disabled={busy} onChange={(event) => setTargetId(event.target.value)}>
-        {user && !users.some((item) => item.user_id === user.id) && <option value={user.id}>{user.email}</option>}
-        {users.map((item) => <option key={item.user_id} value={item.user_id}>{item.display_name} · {item.email}</option>)}
-      </select>
-    </label>}
-    {error && <div className="mcp-error" role="alert">{error}</div>}
+    <div className="ai-summary">
+      <div className="ai-summary-tile">
+        <span className="ai-summary-label">Modelo padrão</span>
+        <strong>{defaultModelLabel}</strong>
+        <small>{AI_PROVIDERS.find((provider) => provider.id === defaultProvider)?.name ?? 'Escolha em Provedores'}</small>
+      </div>
+      <div className="ai-summary-tile">
+        <span className="ai-summary-label">Provedores</span>
+        <strong>{connectedCount} de {AI_PROVIDERS.length}</strong>
+        <small>conectados</small>
+      </div>
+      <div className="ai-summary-tile">
+        <span className="ai-summary-label">Effort padrão (Claude)</span>
+        <strong>{CLAUDE_EFFORT_LABELS_PT[aiPreferences.defaultEffort]}</strong>
+        <small>{aiPreferences.showThinking ? 'Raciocínio visível' : 'Raciocínio oculto'}</small>
+      </div>
+      <div className={`ai-summary-tile ${paidTools.length ? 'ai-summary-tile-paid' : ''}`}>
+        <span className="ai-summary-label">Ferramentas pagas</span>
+        <strong>{paidTools.length ? `${paidTools.length} ativa${paidTools.length > 1 ? 's' : ''}` : 'Desligadas'}</strong>
+        <small>{paidTools.length ? paidTools.join(' · ') : 'Sem custo extra por uso'}</small>
+      </div>
+    </div>
+    <nav className="ai-tabs" role="tablist">
+      {tabs.map((item) => <button key={item.id} type="button" role="tab" aria-selected={tab === item.id}
+        className={`ai-tab ${tab === item.id ? 'ai-tab-active' : ''}`} onClick={() => setTab(item.id)}>{item.label}</button>)}
+    </nav>
+    {(tab === 'providers' || tab === 'catalog') && <>
+      {canManage && <label className="settings-field-label ai-target-user">{tab === 'catalog' ? 'Bloqueios do usuário' : 'Chaves do usuário'}
+        <select className="ai-provider-input" value={targetId} disabled={busy} onChange={(event) => setTargetId(event.target.value)}>
+          {user && !users.some((item) => item.user_id === user.id) && <option value={user.id}>{user.email}</option>}
+          {users.map((item) => <option key={item.user_id} value={item.user_id}>{item.display_name} · {item.email}</option>)}
+        </select>
+      </label>}
+      {error && <div className="mcp-error" role="alert">{error}</div>}
+    </>}
+    {tab === 'providers' && <>
     <div className="ai-provider-list">{AI_PROVIDERS.map((provider) => {
       const key = canManage ? keys.find((item) => item.provider === provider.id) : null
       const configured = canManage ? !!key : !!apiKeys[provider.id]?.configured
@@ -121,7 +166,11 @@ export function AiSection(): JSX.Element {
         })}</div>}
       </div>
     })}</div>
-    {canManage && <div className="ai-integrations-panel"><h3>Catálogo de modelos</h3>
+    </>}
+    {tab === 'behavior' && <AiBehaviorPanel />}
+    {tab === 'tools' && <AiToolsPanel />}
+    {tab === 'catalog' && <>
+    {canManage && <div className="ai-integrations-panel ai-integrations-panel-flat">
       <p className="settings-muted">Modelos desativados ficam indisponíveis para todos. O bloqueio por usuário impede a seleção individual.</p>
       <form className="ai-model-management-form" onSubmit={(event) => void addModel(event)}>
         <select className="ai-provider-input" value={modelDraft.provider} disabled={editingModel} onChange={(event) => setModelDraft((draft) => ({ ...draft, provider: event.target.value as AiProviderId }))}>
@@ -144,5 +193,6 @@ export function AiSection(): JSX.Element {
         </div>
       })}
     </div>}
+    </>}
   </div>
 }

@@ -47,8 +47,9 @@ export interface ChatMeta {
 export interface PersistedToolActivity {
   id: string
   label: string
-  kind: 'skill' | 'mcp' | 'sap'
+  kind: 'skill' | 'mcp' | 'sap' | 'web' | 'source'
   status: 'running' | 'confirm' | 'done' | 'error'
+  url?: string
 }
 
 export interface PersistedMessage {
@@ -58,7 +59,25 @@ export interface PersistedMessage {
   tokensOutput: number | null
   responseMs: number | null
   toolActivity: PersistedToolActivity[] | null
+  /** Resumo do raciocínio e tempo pensando (Claude). Coluna opcional — ver 033. */
+  thinking?: PersistedThinking | null
   createdAt: string
+}
+
+export interface PersistedThinking {
+  text: string
+  ms: number
+}
+
+interface ChatMessageRow {
+  role: 'user' | 'assistant'
+  content: string
+  tokens_input: number | null
+  tokens_output: number | null
+  response_ms: number | null
+  tool_activity: PersistedToolActivity[] | null
+  thinking?: PersistedThinking | null
+  created_at: string
 }
 
 interface CreateChatInput {
@@ -295,19 +314,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   loadChatMessages: async (chatId) => {
-    const { data } = await supabase
-      .from('chat_messages')
-      .select('role, content, tokens_input, tokens_output, response_ms, tool_activity, created_at')
-      .eq('chat_id', chatId)
-      .order('created_at', { ascending: true })
+    const baseColumns = 'role, content, tokens_input, tokens_output, response_ms, tool_activity, created_at'
+    const select = (columns: string) =>
+      supabase.from('chat_messages').select(columns).eq('chat_id', chatId).order('created_at', { ascending: true })
 
-    return (data ?? []).map((row) => ({
+    // `thinking` vem da migração 033; enquanto ela não estiver aplicada o select
+    // com a coluna falha, então repetimos sem ela para o histórico continuar abrindo.
+    let { data, error } = await select(`${baseColumns}, thinking`)
+    if (error) ({ data, error } = await select(baseColumns))
+
+    return ((data ?? []) as unknown as ChatMessageRow[]).map((row) => ({
       role: row.role,
       content: row.content,
       tokensInput: row.tokens_input,
       tokensOutput: row.tokens_output,
       responseMs: row.response_ms,
       toolActivity: row.tool_activity ?? null,
+      thinking: row.thinking ?? null,
       createdAt: row.created_at
     }))
   },
@@ -316,7 +339,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const userId = currentUserId()
     if (!userId) return
 
-    await supabase.from('chat_messages').insert({
+    const row = {
       chat_id: chatId,
       user_id: userId,
       role: message.role,
@@ -325,7 +348,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       tokens_output: message.tokensOutput,
       response_ms: message.responseMs,
       tool_activity: message.toolActivity
-    })
+    }
+    // Sem a migração 033 a coluna `thinking` não existe: nunca perder a mensagem
+    // por causa do resumo de raciocínio — grava de novo sem ele.
+    const { error } = await supabase
+      .from('chat_messages')
+      .insert({ ...row, ...(message.thinking ? { thinking: message.thinking } : {}) })
+    if (error && message.thinking) await supabase.from('chat_messages').insert(row)
 
     await get().touchChat(chatId)
   },

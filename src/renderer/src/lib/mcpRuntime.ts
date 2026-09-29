@@ -1,6 +1,7 @@
 import type { AiProviderId } from '@renderer/lib/aiProviders'
 import type { ChatTurn } from '@renderer/lib/aiClient'
 import type { McpServerItem } from '@renderer/store/mcpStore'
+import { ANTHROPIC_API_URL, claudeHeaders, claudeToolLoopParams } from '@renderer/lib/claudeModels'
 
 interface McpServerConfig {
   id: string
@@ -190,7 +191,7 @@ async function runClaude(args: RunMcpArgs, configs: McpServerConfig[], tools: Mc
   const messages: Array<Record<string, unknown>> = args.messages.map((message) => ({ ...message }))
   const executions: ToolExecution[] = []
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
-    const response = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', signal: args.signal, headers: { 'Content-Type': 'application/json', 'x-api-key': args.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body: JSON.stringify({ model: args.model, max_tokens: 4096, ...(args.systemPrompt ? { system: args.systemPrompt } : {}), messages, tools: tools.map((tool) => ({ name: tool.qualifiedName, description: `[${tool.serverName}] ${tool.description}`, input_schema: tool.inputSchema })) }) })
+    const response = await fetch(ANTHROPIC_API_URL, { method: 'POST', signal: args.signal, headers: claudeHeaders(args.apiKey, args.model), body: JSON.stringify({ ...claudeToolLoopParams(args.model, 4096), ...(args.systemPrompt ? { system: args.systemPrompt } : {}), messages, tools: tools.map((tool) => ({ name: tool.qualifiedName, description: `[${tool.serverName}] ${tool.description}`, input_schema: tool.inputSchema })) }) })
     if (!response.ok) throw new Error(`Claude MCP ${response.status}: ${await response.text()}`)
     const data = await response.json()
     const calls = (data.content ?? []).filter((block: { type?: string }) => block.type === 'tool_use')

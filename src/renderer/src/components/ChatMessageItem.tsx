@@ -1,11 +1,12 @@
 import { memo } from 'react'
-import { AlertCircle, Bot, CheckCircle2, FileText, Loader2, Monitor, RefreshCw, XCircle } from 'lucide-react'
+import { AlertCircle, Bot, CheckCircle2, FileText, Globe, Loader2, Monitor, RefreshCw, XCircle } from 'lucide-react'
 import { Markdown } from './Markdown'
 import { EfDocxGenerator } from './EfDocxGenerator'
 import { StructuredJson } from './StructuredJson'
 import { DtecDocument } from './DtecDocument'
 import { EstimateScenarioCards } from './EstimateScenarioCards'
 import { ClarifyQuestion } from './ClarifyQuestion'
+import { ThinkingBlock } from './ThinkingBlock'
 import { formatDurationMs, formatTokenCount } from '@renderer/lib/format'
 import { parseMessageAttachments } from '@renderer/lib/attachments'
 import { parseEfDocxResponse } from '@renderer/lib/efDocx'
@@ -16,8 +17,10 @@ import { parseClarify } from '@renderer/lib/clarify'
 export interface ToolActivityItem {
   id: string
   label: string
-  kind: 'skill' | 'mcp' | 'sap'
+  /** web = pesquisa/leitura via server tools do Claude; source = fonte citada na resposta. */
+  kind: 'skill' | 'mcp' | 'sap' | 'web' | 'source'
   status: 'running' | 'confirm' | 'done' | 'error'
+  url?: string
 }
 
 export interface UiMessage {
@@ -35,6 +38,12 @@ export interface UiMessage {
   tokensOutput?: number | null
   error?: string
   toolActivity?: ToolActivityItem[]
+  /** Resumo do raciocínio do Claude (exibido só se o usuário expandir). */
+  thinkingText?: string
+  /** Tempo somado dos blocos de thinking já concluídos. */
+  thinkingMs?: number
+  /** Date.now() do início do bloco de thinking em andamento. */
+  thinkingSince?: number
 }
 
 function ToolActivityBadges({ items }: { items: ToolActivityItem[] }): JSX.Element {
@@ -49,7 +58,7 @@ function ToolActivityBadges({ items }: { items: ToolActivityItem[] }): JSX.Eleme
       </div>)}</div>
     </div>}
     <div className="chat-tool-activity">
-      {items.filter((item) => item.kind !== 'sap').map((item) => (
+      {items.filter((item) => item.kind !== 'sap' && item.kind !== 'source').map((item) => (
         <span key={item.id} className={`chat-tool-badge chat-tool-badge-${item.status}`}>
           {item.status === 'running' ? (
             <Loader2 size={11} strokeWidth={2} className="chat-tool-badge-spin" />
@@ -65,6 +74,20 @@ function ToolActivityBadges({ items }: { items: ToolActivityItem[] }): JSX.Eleme
       ))}
     </div>
     </>
+  )
+}
+
+function SourceLinks({ items }: { items: ToolActivityItem[] }): JSX.Element {
+  return (
+    <div className="chat-sources">
+      <span className="chat-sources-title">Fontes</span>
+      {items.map((item) => (
+        <a key={item.id} className="chat-source-link" href={item.url} target="_blank" rel="noreferrer" title={item.url}>
+          <Globe size={11} strokeWidth={1.75} />
+          <span>{item.label}</span>
+        </a>
+      ))}
+    </div>
   )
 }
 
@@ -110,6 +133,7 @@ export const ChatMessageItem = memo(function ChatMessageItem({
     !isUser && !message.streaming && !clarify && !efDocx && !estimate
       ? parseStructuredJson(message.content)
       : null
+  const sources = message.toolActivity?.filter((item) => item.kind === 'source' && item.url) ?? []
 
   return (
     <div className={`chat-message ${isUser ? 'chat-message-user' : 'chat-message-assistant'}`}>
@@ -145,7 +169,12 @@ export const ChatMessageItem = memo(function ChatMessageItem({
         </div>
       ) : (
         <div className="chat-message-assistant-content">
-          {!!message.toolActivity?.length && <ToolActivityBadges items={message.toolActivity} />}
+          {message.toolActivity?.some((item) => item.kind !== 'source') && (
+            <ToolActivityBadges items={message.toolActivity} />
+          )}
+          {(message.thinkingSince !== undefined || message.thinkingMs !== undefined) && (
+            <ThinkingBlock activeSince={message.thinkingSince} text={message.thinkingText} ms={message.thinkingMs} />
+          )}
           {clarify ? (
             <ClarifyQuestion
               question={clarify.question}
@@ -168,7 +197,10 @@ export const ChatMessageItem = memo(function ChatMessageItem({
               clarifyDisabled={clarifyDisabled}
             />
           )}
-          {message.streaming && <span className="chat-message-cursor" aria-hidden="true" />}
+          {sources.length > 0 && !message.streaming && <SourceLinks items={sources} />}
+          {message.streaming && message.thinkingSince === undefined && (
+            <span className="chat-message-cursor" aria-hidden="true" />
+          )}
           {!!message.continuing && (
             <div className="chat-message-continuing">
               <RefreshCw size={11} strokeWidth={2} className="chat-message-continuing-icon" />

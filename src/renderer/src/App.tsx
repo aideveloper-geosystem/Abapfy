@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { TitleBar } from '@renderer/components/TitleBar'
 import { McpConfirmationBanner } from '@renderer/components/McpConfirmationBanner'
+import { UpdateToast } from '@renderer/components/UpdateToast'
 import { SplashScreen } from '@renderer/screens/SplashScreen'
 import { AuthScreen } from '@renderer/screens/AuthScreen'
 import { PasswordRecoveryScreen } from '@renderer/screens/PasswordRecoveryScreen'
@@ -91,6 +92,7 @@ function App(): JSX.Element {
     <div className="app-shell">
       <TitleBar />
       <McpConfirmationBanner />
+      <UpdateToast />
       <div className="app-content">
         <Routes>
           <Route path="/" element={<SplashScreen />} />
