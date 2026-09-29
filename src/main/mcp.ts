@@ -1,3 +1,4 @@
+import { app } from 'electron'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -131,7 +132,7 @@ async function connect(config: McpServerConfig): Promise<Client> {
     for (const key of toolConfirmations.keys()) if (key.startsWith(`${config.id}:`)) toolConfirmations.delete(key)
   }
 
-  const client = new Client({ name: 'abapfy', version: '0.3.6' })
+  const client = new Client({ name: 'abapfy', version: app.getVersion() })
   const transport =
     config.transport === 'streamable_http'
       ? new StreamableHTTPClientTransport(new URL(config.url!), {

@@ -4,6 +4,7 @@ import {
   ArrowUp,
   Bot,
   Building2,
+  Check,
   ChevronDown,
   FileText,
   FolderKanban,
@@ -12,6 +13,7 @@ import {
   Loader2,
   Mic,
   Paperclip,
+  RotateCcw,
   Sparkles,
   Square,
   X,
@@ -46,6 +48,7 @@ import { fetchParametrosContextBlock } from '@renderer/store/estimativaParametro
 import { parseClarify } from '@renderer/lib/clarify'
 import { EF_DOCX_OUTPUT_CONTRACT } from '@renderer/lib/efDocx'
 import { AI_PROVIDERS } from '@renderer/lib/aiProviders'
+import { claudeGeneration } from '@renderer/lib/claudeModels'
 import { useAiModelsStore } from '@renderer/store/aiModelsStore'
 import { NewsScreen } from '@renderer/screens/NewsScreen'
 import { runMcpToolLoop } from '@renderer/lib/mcpRuntime'
@@ -71,6 +74,7 @@ import {
   type AttachmentFile
 } from '@renderer/lib/attachments'
 import './HomeScreen.css'
+import './ModelPicker.css'
 
 function createId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -123,6 +127,7 @@ export function HomeScreen(): JSX.Element {
   const [draftMessages, setDraftMessages] = useState<UiMessage[]>([])
   const [isRouting, setIsRouting] = useState(false)
   const [claudeEffort, setClaudeEffort] = useState<ClaudeEffort>('medium')
+  const [showMaxEffortBurst, setShowMaxEffortBurst] = useState(false)
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
   const [activeAgent, setActiveAgent] = useState<ActiveAgent | null>(null)
   const [selectedAgent, setSelectedAgent] = useState<ActiveAgent | null>(null)
@@ -134,6 +139,7 @@ export function HomeScreen(): JSX.Element {
   const [currentModuleId, setCurrentModuleId] = useState<string | null>(null)
 
   const modelMenuRef = useRef<HTMLDivElement>(null)
+  const modelTriggerRef = useRef<HTMLButtonElement>(null)
   const agentMenuRef = useRef<HTMLDivElement>(null)
   const clientMenuRef = useRef<HTMLDivElement>(null)
   const attachmentMenuRef = useRef<HTMLDivElement>(null)
@@ -245,6 +251,17 @@ export function HomeScreen(): JSX.Element {
   }, [])
 
   useEffect(() => {
+    if (!modelMenuOpen) return
+    function handleModelMenuEscape(event: globalThis.KeyboardEvent): void {
+      if (event.key !== 'Escape') return
+      setModelMenuOpen(false)
+      modelTriggerRef.current?.focus()
+    }
+    document.addEventListener('keydown', handleModelMenuEscape)
+    return () => document.removeEventListener('keydown', handleModelMenuEscape)
+  }, [modelMenuOpen])
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: 'end' })
   }, [messages])
 
@@ -265,6 +282,15 @@ export function HomeScreen(): JSX.Element {
     ? AI_PROVIDERS.find((item) => item.id === defaultProvider)
     : undefined
   const selectedModelDef = availableModels.find((item) => item.provider === defaultProvider && item.model.id === defaultModel)?.model
+  const supportsSelectedEffort = defaultProvider === 'claude' && !!selectedModelDef && claudeGeneration(selectedModelDef.id) !== 'legacy'
+  const effortIndex = CLAUDE_EFFORT_LEVELS.indexOf(claudeEffort)
+  const effortPercent = (effortIndex / (CLAUDE_EFFORT_LEVELS.length - 1)) * 100
+
+  function selectClaudeEffort(next: ClaudeEffort): void {
+    if (next === 'max' && claudeEffort !== 'max') setShowMaxEffortBurst(true)
+    else if (next !== 'max') setShowMaxEffortBurst(false)
+    setClaudeEffort(next)
+  }
   const routerAllowed = managedModels.some((model) => model.provider === 'claude' && model.model_id === ROUTER_MODEL && model.enabled &&
     !modelBlocks.some((block) => block.user_id === user?.id && block.provider === 'claude' && block.model_id === ROUTER_MODEL))
 
@@ -1307,14 +1333,17 @@ export function HomeScreen(): JSX.Element {
               <div className="home-model-select" ref={modelMenuRef}>
                 {modelChoiceError && <span role="alert" title={modelChoiceError} className="home-model-error">{modelChoiceError}</span>}
                 <button
+                  ref={modelTriggerRef}
                   type="button"
-                  className="home-model-trigger"
+                  className={`home-model-trigger ${supportsSelectedEffort && claudeEffort === 'max' ? 'home-model-trigger-max' : ''}`}
+                  aria-haspopup="dialog"
+                  aria-expanded={modelMenuOpen}
                   onClick={() => setModelMenuOpen((open) => !open)}
                 >
                   <span>
                     {selectedModelDef
-                      ? defaultProvider === 'claude'
-                        ? `${selectedModelDef.label} ${CLAUDE_EFFORT_LABELS_PT[claudeEffort]}`
+                      ? supportsSelectedEffort
+                        ? `${selectedModelDef.label} · ${CLAUDE_EFFORT_LABELS_PT[claudeEffort]}`
                         : selectedModelDef.label
                       : 'Selecionar modelo'}
                   </span>
@@ -1322,56 +1351,46 @@ export function HomeScreen(): JSX.Element {
                 </button>
 
                 {modelMenuOpen && (
-                  <div className="home-model-menu">
-                    {defaultProvider === 'claude' && (
-                      <>
-                        <div className="effort-panel">
-                          <div className="effort-panel-header">
-                            <span>Effort</span>
-                            <Zap size={13} strokeWidth={1.75} />
+                  <div className="home-model-menu" role="dialog" aria-label="Selecionar modelo de IA">
+                    {supportsSelectedEffort && (
+                      <div className={`effort-panel ${claudeEffort === 'max' ? 'effort-panel-max' : ''}`}>
+                        <div className="effort-panel-header">
+                          <Zap size={15} strokeWidth={1.8} aria-hidden="true" />
+                          <div className="effort-panel-heading">
+                            <strong>{CLAUDE_EFFORT_LABELS_PT[claudeEffort]}</strong>
+                            <span>{selectedModelDef.label} · Esforço</span>
                           </div>
-                          <div className="effort-slider">
-                            <div className="effort-slider-track">
-                              <div
-                                className="effort-slider-fill"
-                                style={{
-                                  width: `${
-                                    (CLAUDE_EFFORT_LEVELS.indexOf(claudeEffort) /
-                                      (CLAUDE_EFFORT_LEVELS.length - 1)) *
-                                    100
-                                  }%`
-                                }}
-                              />
-                              {CLAUDE_EFFORT_LEVELS.map((level, index) => (
-                                <span
-                                  key={level}
-                                  className="effort-slider-dot"
-                                  style={{
-                                    left: `${(index / (CLAUDE_EFFORT_LEVELS.length - 1)) * 100}%`
-                                  }}
-                                />
-                              ))}
-                            </div>
-                            <input
-                              type="range"
-                              className="effort-slider-input"
-                              min={0}
-                              max={CLAUDE_EFFORT_LEVELS.length - 1}
-                              step={1}
-                              value={CLAUDE_EFFORT_LEVELS.indexOf(claudeEffort)}
-                              onChange={(event) =>
-                                setClaudeEffort(CLAUDE_EFFORT_LEVELS[Number(event.target.value)])
-                              }
-                            />
-                          </div>
-                          <span className="effort-panel-value">
-                            {CLAUDE_EFFORT_LABELS_PT[claudeEffort]}
-                          </span>
+                          <button type="button" className="effort-reset" title="Restaurar esforço médio" aria-label="Restaurar esforço médio" onClick={() => selectClaudeEffort('medium')}>
+                            <RotateCcw size={15} strokeWidth={1.75} />
+                          </button>
                         </div>
-                        <div className="home-model-menu-divider" />
-                      </>
+                        <div className="effort-slider">
+                          <div className="effort-slider-track">
+                            <div className="effort-slider-fill" style={{ width: `${effortPercent}%` }} />
+                            {CLAUDE_EFFORT_LEVELS.map((level, index) => (
+                              <span key={level} className="effort-slider-dot" style={{ left: `${(index / (CLAUDE_EFFORT_LEVELS.length - 1)) * 100}%` }} />
+                            ))}
+                            {showMaxEffortBurst && <span className="effort-max-burst" aria-hidden="true" onAnimationEnd={() => setShowMaxEffortBurst(false)} />}
+                          </div>
+                          <input
+                            type="range"
+                            className="effort-slider-input"
+                            aria-label="Esforço do modelo Claude"
+                            aria-valuetext={CLAUDE_EFFORT_LABELS_PT[claudeEffort]}
+                            min={0}
+                            max={CLAUDE_EFFORT_LEVELS.length - 1}
+                            step={1}
+                            value={effortIndex}
+                            onChange={(event) => selectClaudeEffort(CLAUDE_EFFORT_LEVELS[Number(event.target.value)])}
+                          />
+                        </div>
+                        <div className="effort-panel-scale"><span>Baixo</span><span>Máximo</span></div>
+                      </div>
                     )}
-
+                    <div className="home-model-menu-list-heading">
+                      <span>Modelos disponíveis</span>
+                      <small>{availableModels.length}</small>
+                    </div>
                     {availableModels.length === 0 ? (
                       <button
                         type="button"
@@ -1381,26 +1400,30 @@ export function HomeScreen(): JSX.Element {
                           setSettingsOpen(true)
                         }}
                       >
-                        Nenhuma chave de IA configurada — abrir Configurações
+                        Nenhum modelo disponível — abrir Configurações
                       </button>
                     ) : (
-                      availableModels.map(({ provider, providerName, model }) => (
-                        <button
+                      availableModels.map(({ provider, providerName, model }) => {
+                        const selected = provider === defaultProvider && model.id === defaultModel
+                        return <button
                           key={`${provider}-${model.id}`}
                           type="button"
-                          className="home-model-menu-item"
+                          aria-pressed={selected}
+                          className={`home-model-menu-item ${selected ? 'home-model-menu-item-active' : ''}`}
+                          title={model.description || model.label}
                           onClick={() => {
                             void setDefaultModel(provider, model.id).catch((cause) => {
                               setModelChoiceError((cause as Error).message)
                             })
                             setModelChoiceError(null)
                             setModelMenuOpen(false)
+                            setShowMaxEffortBurst(false)
                           }}
                         >
-                          <span className="home-model-menu-item-label">{model.label}</span>
-                          <span className="home-model-menu-item-provider">{providerName}</span>
+                          <span className="home-model-menu-item-main"><span className="home-model-menu-item-label">{model.label}</span><span className="home-model-menu-item-provider">{providerName}</span></span>
+                          {selected && <Check size={15} className="home-model-menu-item-check" aria-hidden="true" />}
                         </button>
-                      ))
+                      })
                     )}
                   </div>
                 )}

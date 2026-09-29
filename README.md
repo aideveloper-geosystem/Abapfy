@@ -5,7 +5,7 @@
 
   **Workspace desktop para equipes SAP: conhecimento, agentes de IA e trabalho por cliente em um só lugar.**
 
-  [![Versão](https://img.shields.io/badge/vers%C3%A3o-0.3.13-0a6ed1?style=flat-square)](CHANGELOG.md)
+  [![Versão](https://img.shields.io/badge/vers%C3%A3o-1.0.0-0a6ed1?style=flat-square)](CHANGELOG.md)
   [![Plataformas](https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-desktop-354a5f?style=flat-square)](https://github.com/esc4n0rx/abapfyv2/releases)
   [![Electron](https://img.shields.io/badge/Electron-32-47848f?style=flat-square)](package.json)
   [![React](https://img.shields.io/badge/React-18-149eca?style=flat-square)](package.json)

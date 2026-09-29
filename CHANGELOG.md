@@ -4,6 +4,23 @@ Todas as mudanças notáveis deste projeto serão documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [1.0.0] - 2026-09-29
+
+Primeira versão pública estável do Abapfy.
+
+### Destaques
+
+- Workspace desktop para equipes SAP organizado por cliente e módulo, com chats persistentes, drive compartilhado, projetos, tarefas, agentes e skills.
+- Modelos OpenAI, Gemini e Claude autorizados por usuário; integrações MCP e contexto SAP GUI conforme a configuração do ambiente.
+- Modal de configurações ampliado, com busca e seções organizadas. A nova aba Perfil reúne dados da conta, métricas de uso, atividade diária, conversas recentes e modelos utilizados.
+- Aba Aparência com prévias dos temas SAP Horizon/Quartz e opções de alto contraste.
+- Seletor de modelos refinado, com modelo ativo em destaque e controle de esforço para modelos Claude compatíveis. O nível Máximo exibe um efeito visual breve, respeitando a preferência de movimento reduzido.
+- Marca mantida no cabeçalho da janela, com navegação lateral mais limpa.
+
+### Configuração necessária
+
+- O aplicativo não aplica migrações Supabase automaticamente. Administradores devem manter o projeto conectado atualizado conforme `supabase/README.md`, inclusive as migrações 032–034 para recursos introduzidos na versão anterior.
+
 ## [0.3.15] - 2026-09-29
 
 ### Adicionado

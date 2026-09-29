@@ -8,28 +8,6 @@
   border-right: 1px solid var(--color-hairline);
 }
 
-.sidebar-brand {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  height: 48px;
-  padding: 0 var(--space-md);
-}
-
-.sidebar-brand-mark {
-  width: 28px;
-  height: 28px;
-  object-fit: contain;
-}
-
-.sidebar-brand-name {
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 15px;
-  letter-spacing: -0.3px;
-  color: var(--color-ink);
-}
-
 .sidebar-user-menu-error {
   padding: var(--space-xs) var(--space-sm);
   color: var(--color-semantic-danger);
@@ -40,7 +18,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 0 var(--space-sm) var(--space-sm);
+  padding: var(--space-sm);
 }
 
 .sidebar-shortcut {
