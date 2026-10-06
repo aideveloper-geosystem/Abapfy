@@ -868,3 +868,6 @@
 .sap-context-explainer h3 { margin: 0 0 9px; font-size: 14px; color: var(--color-ink); }
 .sap-context-explainer label { display: block; margin: 12px 0 6px; color: var(--color-ink); font-size: 12px; }
 .sap-context-explainer select { width: 100%; margin-bottom: 11px; }
+
+.sap-context-explainer .sap-gui-toggle { display: flex; font-size: 13px; }
+.sap-context-explainer .sap-full-warning { color: var(--color-semantic-danger); font-weight: 500; }

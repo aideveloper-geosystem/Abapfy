@@ -17,7 +17,7 @@ const SECTIONS: { id: SectionId; label: string; icon: typeof Palette; group: str
   { id: 'general', label: 'Aparência', icon: Palette, group: 'Pessoal' },
   { id: 'ai', label: 'Inteligência Artificial', icon: Bot, group: 'Trabalho' },
   { id: 'mcp', label: 'MCP', icon: Server, group: 'Trabalho' },
-  { id: 'sap-context', label: 'Contexto SAP', icon: Monitor, group: 'Trabalho' },
+  { id: 'sap-context', label: 'Computer use · SAP', icon: Monitor, group: 'Trabalho' },
   { id: 'parametros', label: 'Parâmetros', icon: SlidersHorizontal, group: 'Trabalho' },
   { id: 'clients', label: 'Clientes', icon: Building2, group: 'Workspace' },
   { id: 'administration', label: 'Administração', icon: Shield, group: 'Workspace' },

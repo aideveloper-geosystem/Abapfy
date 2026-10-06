@@ -1,5 +1,5 @@
-import { FormEvent, useState } from 'react'
-import { ArrowRight, HelpCircle } from 'lucide-react'
+import { FormEvent, useId, useState } from 'react'
+import { ArrowRight, CheckCircle2, HelpCircle } from 'lucide-react'
 import './ClarifyQuestion.css'
 
 interface ClarifyQuestionProps {
@@ -17,6 +17,8 @@ export function ClarifyQuestion({
 }: ClarifyQuestionProps): JSX.Element {
   const [answered, setAnswered] = useState(false)
   const [customText, setCustomText] = useState('')
+  const [selected, setSelected] = useState<string | null>(null)
+  const headingId = useId()
 
   const isDisabled = disabled || answered || !onAnswer
 
@@ -34,8 +36,8 @@ export function ClarifyQuestion({
   }
 
   return (
-    <div className="clarify-question">
-      <div className="clarify-question-text">
+    <section className="clarify-question" aria-labelledby={headingId}>
+      <div className="clarify-question-text" id={headingId}>
         <HelpCircle size={15} strokeWidth={1.75} />
         {question}
       </div>
@@ -48,7 +50,8 @@ export function ClarifyQuestion({
               type="button"
               className="clarify-option"
               disabled={isDisabled}
-              onClick={() => handleOption(option)}
+              aria-pressed={selected === option}
+              onClick={() => { setSelected(option); setCustomText('') }}
             >
               {option}
             </button>
@@ -60,16 +63,19 @@ export function ClarifyQuestion({
         <input
           type="text"
           placeholder="Ou digite algo diferente…"
+          aria-label="Resposta personalizada"
           value={customText}
           disabled={isDisabled}
-          onChange={(event) => setCustomText(event.target.value)}
+          onChange={(event) => { setCustomText(event.target.value); setSelected(null) }}
         />
         <button type="submit" disabled={isDisabled || !customText.trim()} aria-label="Enviar">
           <ArrowRight size={13} strokeWidth={2} />
         </button>
       </form>
 
-      {answered && <span className="clarify-answered">Resposta enviada ✓</span>}
-    </div>
+      {options.length > 0 && <button type="button" className="clarify-continue" disabled={isDisabled || !selected} onClick={() => selected && handleOption(selected)}>Confirmar opção <ArrowRight size={13} /></button>}
+
+      {answered && <span className="clarify-answered" role="status"><CheckCircle2 size={13} /> Resposta enviada</span>}
+    </section>
   )
 }

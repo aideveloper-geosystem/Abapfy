@@ -32,8 +32,8 @@ function ContextSection({
       ) : (
         <ul>
           {items.map((item) => (
-            <li key={item} title={item}>
-              {item}
+            <li key={item} title={item} className="ai-context-resource">
+              <Icon size={12} /> <span>{item}</span>
             </li>
           ))}
         </ul>

@@ -1,3 +1,4 @@
+import { isEfModule } from '@renderer/lib/efDrive'
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
 import { BookOpen, ChevronRight, FileText, Folder, FolderInput, FolderPlus, MessageSquarePlus, Plus, Trash2, Upload } from 'lucide-react'
 import { supabase } from '@renderer/lib/supabaseClient'
@@ -184,6 +185,10 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
     if (!selected || !client || !module || !user) return
     try {
       if (selected.size > 20 * 1024 * 1024) throw new Error('O arquivo deve ter no máximo 20 MB.')
+      if (isEfModule(module.name) && ['default.docx', 'base.docx'].includes(selected.name.toLowerCase())) {
+        if (folderId) throw new Error('Envie default.docx ou base.docx na raiz do módulo EFs do cliente.')
+        if (files.some((file) => file.folder_id === null && file.name.toLowerCase() === selected.name.toLowerCase())) throw new Error('Já existe um modelo com este nome. Mova o modelo anterior para a lixeira antes de enviar o novo.')
+      }
       const content = await extractTextFromFile(selected)
       const id = crypto.randomUUID()
       const extension = selected.name.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin'
@@ -469,6 +474,11 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
                 </div>
               </div>
               <p>{module.description}</p>
+              {isEfModule(module.name) && !folderId && <p>
+                {files.some((file) => file.folder_id === null && file.name.toLowerCase() === 'default.docx')
+                  ? 'Modelo EF do cliente: default.docx. Novas especificações usarão este arquivo.'
+                  : files.some((file) => file.folder_id === null && file.name.toLowerCase() === 'base.docx') ? 'Modelo EF: base.docx do drive será usado enquanto default.docx estiver ausente.' : 'Envie default.docx (modelo do cliente) ou base.docx (modelo base) nesta pasta para gerar EFs.'}
+              </p>}
               <div className="clients-section-heading">
                 <h3>Arquivos</h3>
                 <div className="clients-file-actions">

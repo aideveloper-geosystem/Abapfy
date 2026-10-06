@@ -3,7 +3,8 @@
   "include": [
     "src/renderer/src/**/*",
     "src/renderer/src/**/*.tsx",
-    "src/preload/index.d.ts"
+    "src/preload/index.d.ts",
+    "src/shared/**/*"
   ],
   "exclude": ["src/renderer/src/skills/**/*"],
   "compilerOptions": {

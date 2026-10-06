@@ -9,6 +9,9 @@
   margin: var(--space-xs) 0;
 }
 
+.ef-docx-shared { flex-wrap: wrap; }
+.ef-docx-error-detail { color: var(--color-semantic-danger); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+
 .ef-docx-icon {
   display: inline-flex;
   align-items: center;

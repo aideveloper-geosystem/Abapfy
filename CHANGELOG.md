@@ -4,6 +4,32 @@ Todas as mudanças notáveis deste projeto serão documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
+## [Unreleased]
+
+## [1.0.1] - 2026-10-06
+
+### Interface de IA
+
+- Adaptação do catálogo Beautiful UI ao SAP Fiori Horizon: atividade recolhível, contexto em cards, sugestões SAP, comandos de prompt e fontes agrupadas.
+- Cards opcionais de recomendação, indicadores, fluxos, tabelas filtráveis e comparações de campos nas respostas livres, com validação de formato e evidências.
+- Cópia de respostas, ações sobre trechos selecionados e comparação de código com números de linha e diff.
+- Busca e recolhimento da navegação; lista de tarefas com busca, filtros por status e contagem.
+- Confirmação explícita de opções de esclarecimento, resumo de ajustes da IA e prévia efêmera da tela SAP consultada.
+- Contratos especializados e autorizações de ferramentas preservados; detalhes da cobertura em `docs/ai-interface-1.0.1.md`.
+
+### Documentos e contexto SAP
+
+- Geração de EF com modelos DOCX do drive do cliente, preservação das partes não editadas, salvamento compartilhado e abertura do documento gerado.
+- Respostas técnicas e de customizing com apresentação estruturada; melhorias nos cards de estimativa.
+- Refinamentos na captura e no controle nativo do SAP GUI, no acompanhamento das ações e nas regras de autorização.
+
+### Migração para a empresa
+
+- Publicação e canal de atualização das novas instalações apontam para `aideveloper-geosystem/Abapfy`.
+- Build configurada com o Supabase da empresa; banco, usuários e arquivos migrados, preservando IDs e permissões.
+- SMTP e recuperação de senha por e-mail permanecem pendentes de configuração no novo Supabase.
+- Instalações anteriores ainda consultam o canal de atualização antigo e precisam instalar esta versão para passar ao novo canal.
+
 ## [1.0.0] - 2026-09-29
 
 Primeira versão pública estável do Abapfy.

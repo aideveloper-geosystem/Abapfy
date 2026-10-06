@@ -1,4 +1,10 @@
 import { CodeBlock } from './CodeBlock'
+import { createContext, useContext } from 'react'
+import {
+  isSourceCodeField,
+  TECHNICAL_LABELS,
+  TECHNICAL_VALUES
+} from '@renderer/lib/structuredPresentation'
 import type { StructuredValue } from '@renderer/lib/structuredResponse'
 import './StructuredJson.css'
 
@@ -12,7 +18,7 @@ const BADGE_KEYS = new Set([
   'status'
 ])
 
-const CODE_KEY_PATTERN = /code|skeleton|snippet|script|payload/i
+const LocalizedContext = createContext(false)
 
 const STATUS_COLOR: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
   critical: 'danger',
@@ -54,12 +60,27 @@ interface FieldProps {
 }
 
 function Field({ fieldKey, value }: FieldProps): JSX.Element | null {
+  const localized = useContext(LocalizedContext)
+  const fieldLabel = localized
+    ? (TECHNICAL_LABELS[fieldKey] ?? humanizeKey(fieldKey))
+    : humanizeKey(fieldKey)
+  const displayValue =
+    typeof value === 'string' ? (localized ? (TECHNICAL_VALUES[value] ?? value) : value) : ''
+  // Compatibility is explicitly unknown, rather than silently omitted.
+  if (value === null && fieldKey === 's4hana_compatible' && localized) {
+    return (
+      <div className="structured-field">
+        <span className="structured-field-label">{fieldLabel}</span>
+        <span className="structured-badge structured-badge-neutral">A confirmar</span>
+      </div>
+    )
+  }
   if (value === null || value === undefined || value === '') return null
 
   if (typeof value === 'boolean') {
     return (
       <div className="structured-field">
-        <span className="structured-field-label">{humanizeKey(fieldKey)}</span>
+        <span className="structured-field-label">{fieldLabel}</span>
         <span className={`structured-badge structured-badge-${value ? 'success' : 'danger'}`}>
           {value ? 'Sim' : 'Não'}
         </span>
@@ -70,7 +91,7 @@ function Field({ fieldKey, value }: FieldProps): JSX.Element | null {
   if (typeof value === 'number') {
     return (
       <div className="structured-field">
-        <span className="structured-field-label">{humanizeKey(fieldKey)}</span>
+        <span className="structured-field-label">{fieldLabel}</span>
         <span className="structured-field-number">{value}</span>
       </div>
     )
@@ -81,16 +102,16 @@ function Field({ fieldKey, value }: FieldProps): JSX.Element | null {
       const color = STATUS_COLOR[value.toLowerCase()] ?? 'neutral'
       return (
         <div className="structured-field">
-          <span className="structured-field-label">{humanizeKey(fieldKey)}</span>
-          <span className={`structured-badge structured-badge-${color}`}>{value}</span>
+          <span className="structured-field-label">{fieldLabel}</span>
+          <span className={`structured-badge structured-badge-${color}`}>{displayValue}</span>
         </div>
       )
     }
 
-    if (CODE_KEY_PATTERN.test(fieldKey)) {
+    if (isSourceCodeField(fieldKey)) {
       return (
         <div className="structured-field structured-field-block">
-          <span className="structured-field-label">{humanizeKey(fieldKey)}</span>
+          <span className="structured-field-label">{fieldLabel}</span>
           <CodeBlock language="abap" code={value} />
         </div>
       )
@@ -98,8 +119,8 @@ function Field({ fieldKey, value }: FieldProps): JSX.Element | null {
 
     return (
       <div className="structured-field structured-field-block">
-        <span className="structured-field-label">{humanizeKey(fieldKey)}</span>
-        <p className="structured-field-text">{value}</p>
+        <span className="structured-field-label">{fieldLabel}</span>
+        <p className="structured-field-text">{displayValue}</p>
       </div>
     )
   }
@@ -111,7 +132,7 @@ function Field({ fieldKey, value }: FieldProps): JSX.Element | null {
     if (allPrimitive) {
       return (
         <div className="structured-field structured-field-block">
-          <span className="structured-field-label">{humanizeKey(fieldKey)}</span>
+          <span className="structured-field-label">{fieldLabel}</span>
           <div className="structured-chip-list">
             {value.map((item, index) => (
               <span key={index} className="structured-chip">
@@ -125,7 +146,7 @@ function Field({ fieldKey, value }: FieldProps): JSX.Element | null {
 
     return (
       <div className="structured-field structured-field-block">
-        <span className="structured-field-label">{humanizeKey(fieldKey)}</span>
+        <span className="structured-field-label">{fieldLabel}</span>
         <div className="structured-array">
           {value.map((item, index) => {
             if (!isPlainObject(item)) {
@@ -158,7 +179,7 @@ function Field({ fieldKey, value }: FieldProps): JSX.Element | null {
   if (isPlainObject(value)) {
     return (
       <div className="structured-field structured-field-block">
-        <span className="structured-field-label">{humanizeKey(fieldKey)}</span>
+        <span className="structured-field-label">{fieldLabel}</span>
         <div className="structured-nested">
           {Object.entries(value).map(([key, subValue]) => (
             <Field key={key} fieldKey={key} value={subValue} />
@@ -173,14 +194,17 @@ function Field({ fieldKey, value }: FieldProps): JSX.Element | null {
 
 interface StructuredJsonProps {
   data: Record<string, StructuredValue>
+  localized?: boolean
 }
 
-export function StructuredJson({ data }: StructuredJsonProps): JSX.Element {
+export function StructuredJson({ data, localized = false }: StructuredJsonProps): JSX.Element {
   return (
-    <div className="structured-json">
-      {Object.entries(data).map(([key, value]) => (
-        <Field key={key} fieldKey={key} value={value} />
-      ))}
-    </div>
+    <LocalizedContext.Provider value={localized}>
+      <div className="structured-json">
+        {Object.entries(data).map(([key, value]) => (
+          <Field key={key} fieldKey={key} value={value} />
+        ))}
+      </div>
+    </LocalizedContext.Provider>
   )
 }

@@ -29,6 +29,7 @@ mac:
   category: public.app-category.developer-tools
   target:
     - dmg
+    - zip
 dmg:
   artifactName: ${name}-${version}.${ext}
 linux:
@@ -39,6 +40,6 @@ linux:
 npmRebuild: false
 publish:
   provider: github
-  owner: esc4n0rx
-  repo: abapfyv2
+  owner: aideveloper-geosystem
+  repo: Abapfy
   releaseType: release

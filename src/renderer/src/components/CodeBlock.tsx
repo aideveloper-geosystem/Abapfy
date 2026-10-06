@@ -1,4 +1,4 @@
-import { memo, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { Check, Copy } from 'lucide-react'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
@@ -16,20 +16,27 @@ interface CodeBlockProps {
 // de fato crescendo (dentro da cerca ``` sendo digitada) recalcula.
 export const CodeBlock = memo(function CodeBlock({ language, code }: CodeBlockProps): JSX.Element {
   const [copied, setCopied] = useState(false)
+  const [copyError, setCopyError] = useState(false)
+  const timerRef = useRef<number>()
+  const lines = code.split('\n')
+  useEffect(() => () => window.clearTimeout(timerRef.current), [])
 
   async function handleCopy(): Promise<void> {
-    await navigator.clipboard.writeText(code)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(true); setCopyError(false)
+      window.clearTimeout(timerRef.current)
+      timerRef.current = window.setTimeout(() => setCopied(false), 1500)
+    } catch { setCopyError(true) }
   }
 
   return (
     <div className="code-block">
       <div className="code-block-header">
-        <span className="code-block-lang">{language || 'text'}</span>
+        <span className="code-block-lang">{language || 'text'} · {lines.length} {lines.length === 1 ? 'linha' : 'linhas'}</span>
         <button type="button" className="code-block-copy" onClick={handleCopy}>
           {copied ? <Check size={12} strokeWidth={2} /> : <Copy size={12} strokeWidth={1.75} />}
-          {copied ? 'Copiado' : 'Copiar'}
+          {copied ? 'Copiado' : copyError ? 'Use Ctrl+C' : 'Copiar'}
         </button>
       </div>
       <SyntaxHighlighter
@@ -43,6 +50,12 @@ export const CodeBlock = memo(function CodeBlock({ language, code }: CodeBlockPr
         }}
         codeTagProps={{ style: { fontFamily: 'var(--font-mono)' } }}
         wrapLongLines
+        showLineNumbers
+        lineNumberStyle={{ color: 'var(--color-ink-tertiary)', minWidth: '2.5em', userSelect: 'none' }}
+        wrapLines
+        lineProps={(lineNumber) => ({
+          className: language === 'diff' ? lines[lineNumber - 1]?.startsWith('+') ? 'code-line-added' : lines[lineNumber - 1]?.startsWith('-') ? 'code-line-removed' : undefined : undefined
+        })}
       >
         {code}
       </SyntaxHighlighter>

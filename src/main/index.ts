@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { setupAutoUpdater } from './updater'
+import { openGeneratedDocx } from './documentFiles'
 import {
   callMcpTool,
   cancelMcpCall,
@@ -16,7 +17,7 @@ import {
   type McpServerConfig
 } from './mcp'
 import { readMcpLocalConfig, saveMcpLocalCatalog, saveMcpLocalServerConfig, type McpLocalConfig, type McpLocalServerConfig } from './mcpLocalConfig'
-import { scanSapWindows, readSapWindowSettings, saveSapWindowSettings, captureSapWindow, performSapControl, type SapWindowSettings, type SapControlAction } from './sapWindowContext'
+import { scanSapWindows, readSapWindowSettings, saveSapWindowSettingsWithApproval, captureSapWindow, performSapControl, type SapWindowSettings, type SapControlAction } from './sapWindowContext'
 
 let mainWindow: BrowserWindow | null = null
 const approvedStdioConfigs = new Set<string>()
@@ -92,6 +93,10 @@ function registerWindowControlIpc(): void {
 }
 
 function registerDocumentIpc(): void {
+  ipcMain.handle('document:openDocx', async (event, bytes: unknown, fileName: unknown): Promise<void> => {
+    if (event.sender !== mainWindow?.webContents) throw new Error('Janela não autorizada para abrir documentos.')
+    await openGeneratedDocx(bytes, fileName, app.getPath('temp'), (path) => shell.openPath(path))
+  })
   ipcMain.handle('document:renderPdf', async (_event, html: string): Promise<string> => {
     if (typeof html !== 'string' || html.length > 2_000_000 || !html.startsWith('<!doctype html>')) {
       throw new Error('Documento inválido ou grande demais para gerar o PDF.')
@@ -272,12 +277,22 @@ function registerMcpIpc(): void {
 
 function registerSapGuiIpc(): void {
   const activeControls = new Map<string, AbortController>()
-  ipcMain.handle('sapGui:controlStatus', () => ({ version: 2 as const }))
+  ipcMain.handle('sapGui:controlStatus', () => ({ version: 4 as const }))
   ipcMain.handle('sapGui:readSettings', (_event, userId: string) => readSapWindowSettings(userId))
-  ipcMain.handle('sapGui:saveSettings', (_event, userId: string, value: SapWindowSettings) => saveSapWindowSettings(userId, value))
+  ipcMain.handle('sapGui:saveSettings', (_event, userId: string, value: SapWindowSettings) =>
+    saveSapWindowSettingsWithApproval(userId, value, async () => {
+      if (!mainWindow) throw new Error('Abra a janela do Abapfy para ativar o modo Full.')
+      const choice = await dialog.showMessageBox(mainWindow, {
+        type: 'warning', title: 'Ativar modo Full no SAP?',
+        message: 'O agente poderá agir no SAP sem pedir aprovação.',
+        detail: 'Cliques, digitação, alterações e execução de programas poderão modificar dados na sessão escolhida. Capturas serão enviadas aos modelos utilizados. Ative apenas se aceitar esse controle. Você pode parar a tarefa no chat ou desativar o controle nas configurações.',
+        buttons: ['Cancelar', 'Ativar modo Full'], defaultId: 0, cancelId: 0, noLink: true
+      })
+      return choice.response === 1
+    }))
   ipcMain.handle('sapGui:listSessions', () => scanSapWindows())
   ipcMain.handle('sapGui:snapshot', (_event, userId: string) => captureSapWindow(userId))
-  ipcMain.handle('sapGui:control', async (_event, userId: string, action: SapControlAction, callId: string) => {
+  ipcMain.handle('sapGui:control', async (_event, userId: string, action: SapControlAction, callId: string, captureId: string) => {
     if (typeof callId !== 'string' || !/^sap-[a-z0-9-]{1,80}$/i.test(callId)) throw new Error('Identificador da ação SAP inválido.')
     if (activeControls.has(callId)) throw new Error('Ação SAP duplicada.')
     const controller = new AbortController()
@@ -285,7 +300,7 @@ function registerSapGuiIpc(): void {
     try {
       return await performSapControl(userId, action, (detail) => requestMcpConfirmation({
         callId, kind: 'tool', serverName: 'SAP GUI', toolName: action.kind, detail
-      }), controller.signal)
+      }), controller.signal, captureId)
     } finally { activeControls.delete(callId) }
   })
   ipcMain.on('sapGui:cancelControl', (_event, callId: string) => {

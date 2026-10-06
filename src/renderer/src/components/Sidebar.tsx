@@ -14,6 +14,9 @@ import {
   LogOut,
   MoreHorizontal,
   Newspaper,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Search,
   Settings,
   Sparkles,
   SquarePen,
@@ -225,6 +228,8 @@ export function Sidebar({
   workPresence
 }: SidebarProps): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
+  const [query, setQuery] = useState('')
   const [signOutError, setSignOutError] = useState<string | null>(null)
   const navigate = useNavigate()
   const [usageOpen, setUsageOpen] = useState(false)
@@ -323,7 +328,8 @@ export function Sidebar({
   }
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''}`}>
+      <div className="sidebar-workspace-header"><span>Área de trabalho</span><button type="button" aria-label={collapsed ? 'Expandir navegação' : 'Recolher navegação'} title={collapsed ? 'Expandir navegação' : 'Recolher navegação'} aria-expanded={!collapsed} onClick={() => { setCollapsed((value) => !value); setMenuOpen(false) }}>{collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button></div>
       <nav className="sidebar-shortcuts">
         {SHORTCUTS.map(({ id, icon: Icon, label }) => (
           <button
@@ -331,6 +337,9 @@ export function Sidebar({
             type="button"
             className={`sidebar-shortcut ${activeView === id ? 'sidebar-shortcut-active' : ''}`}
             onClick={() => handleShortcutClick(id)}
+            title={label}
+            aria-label={label}
+            aria-current={activeView === id ? 'page' : undefined}
           >
             <Icon size={16} strokeWidth={1.75} />
             <span>{label}</span>
@@ -339,11 +348,13 @@ export function Sidebar({
       </nav>
 
       <div className="sidebar-scroll">
+        <label className="sidebar-search"><Search size={13} /><input value={query} aria-label="Buscar chats recentes e projetos carregados" placeholder="Buscar chats e projetos…" onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setQuery('') }} /></label>
         <div className="sidebar-section">
           <span className="sidebar-section-title">Chats recentes</span>
           <ul className="sidebar-list">
-            {recentChats.length === 0 && <li className="sidebar-list-empty">Nenhum chat ainda</li>}
-            {recentChats.map((chat) => (
+            {recentChats.length === 0 && !query && <li className="sidebar-list-empty">Nenhum chat ainda</li>}
+            {query && !recentChats.some((chat) => chat.title.toLocaleLowerCase('pt-BR').includes(query.toLocaleLowerCase('pt-BR'))) && <li className="sidebar-list-empty">Nenhum chat recente encontrado.</li>}
+            {recentChats.filter((chat) => chat.title.toLocaleLowerCase('pt-BR').includes(query.toLocaleLowerCase('pt-BR'))).map((chat) => (
               <li key={chat.id} className="sidebar-list-row">
                 <button
                   type="button"
@@ -378,8 +389,9 @@ export function Sidebar({
         <div className="sidebar-section">
           <span className="sidebar-section-title">Projetos</span>
           <ul className="sidebar-list">
-            {projects.length === 0 && <li className="sidebar-list-empty">Nenhum projeto ainda</li>}
-            {projects.map((project) => (
+            {projects.length === 0 && !query && <li className="sidebar-list-empty">Nenhum projeto ainda</li>}
+            {query && !projects.some((project) => project.name.toLocaleLowerCase('pt-BR').includes(query.toLocaleLowerCase('pt-BR'))) && <li className="sidebar-list-empty">Nenhum projeto encontrado.</li>}
+            {projects.filter((project) => project.name.toLocaleLowerCase('pt-BR').includes(query.toLocaleLowerCase('pt-BR'))).map((project) => (
               <li key={project.id}>
                 <button
                   type="button"
@@ -478,6 +490,8 @@ export function Sidebar({
         <button
           type="button"
           className="sidebar-user-trigger"
+          aria-label={`Menu de ${displayName}`}
+          aria-expanded={menuOpen}
           onClick={() => setMenuOpen((open) => !open)}
         >
           <span className="sidebar-avatar">{initials || 'A'}</span>

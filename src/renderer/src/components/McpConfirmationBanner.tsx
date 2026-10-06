@@ -45,7 +45,8 @@ export function McpConfirmationBanner(): JSX.Element | null {
                 ? `Iniciar servidor MCP local "${request.serverName}"?`
                 : `Autorizar "${request.toolName}" em ${request.serverName}?`}
             </p>
-            <pre className="mcp-confirm-card-detail">{request.detail}</pre>
+            <span className="mcp-confirm-card-context">{request.kind === 'server' ? 'Inicialização local' : 'Solicitação de ferramenta'} · aguardando sua decisão</span>
+            <details open><summary>Detalhes da solicitação</summary><pre className="mcp-confirm-card-detail">{request.detail}</pre></details>
             <div className="mcp-confirm-card-actions">
               <button type="button" className="mcp-confirm-btn-deny" onClick={() => respond(request.callId, false)}>
                 Cancelar

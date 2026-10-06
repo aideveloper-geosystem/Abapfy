@@ -126,7 +126,7 @@ const sapGui = {
   listSessions: () => ipcRenderer.invoke('sapGui:listSessions'),
   snapshot: (userId: string) => ipcRenderer.invoke('sapGui:snapshot', userId),
   controlStatus: () => ipcRenderer.invoke('sapGui:controlStatus'),
-  control: (userId: string, action: unknown, callId: string) => ipcRenderer.invoke('sapGui:control', userId, action, callId),
+  control: (userId: string, action: unknown, callId: string, captureId: string) => ipcRenderer.invoke('sapGui:control', userId, action, callId, captureId),
   cancelControl: (callId: string) => ipcRenderer.send('sapGui:cancelControl', callId)
 }
 
@@ -136,7 +136,8 @@ const api = {
   mcp,
   sapGui,
   documents: {
-    renderPdf: (html: string) => ipcRenderer.invoke('document:renderPdf', html) as Promise<string>
+    renderPdf: (html: string) => ipcRenderer.invoke('document:renderPdf', html) as Promise<string>,
+    openDocx: (bytes: Uint8Array, fileName: string) => ipcRenderer.invoke('document:openDocx', bytes, fileName) as Promise<void>
   }
 }
 

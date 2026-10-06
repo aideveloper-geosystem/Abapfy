@@ -13,9 +13,11 @@ import {
   Clock3,
   GripVertical,
   LayoutGrid,
+  List,
   Link2,
   Plus,
   Repeat2,
+  Search,
   Settings2,
   Trash2,
   UserRound,
@@ -789,7 +791,11 @@ export function TasksScreen(): JSX.Element {
   const { tasks, columns, loaded, loading, error, load, moveTask } = useTasksStore()
   const [modal, setModal] = useState<{ task: TaskItem | null; status: TaskStatus } | null>(null)
   const [columnManager, setColumnManager] = useState(false)
-  const [view, setView] = useState<'board' | 'calendar'>('board')
+  const [view, setView] = useState<'board' | 'calendar' | 'list'>('board')
+  const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<string | null>(null)
+  const visibleTasks = useMemo(() => tasks.filter((task) => (!statusFilter || task.status === statusFilter) &&
+    [task.title, task.description, task.sapModule, task.assignee, ...task.labels].some((value) => value?.toLocaleLowerCase('pt-BR').includes(query.trim().toLocaleLowerCase('pt-BR')))), [tasks, query, statusFilter])
   const [month, setMonth] = useState(() => new Date())
   useEffect(() => {
     if (!loaded) void load()
@@ -799,10 +805,10 @@ export function TasksScreen(): JSX.Element {
       Object.fromEntries(
         columns.map((column) => [
           column.key,
-          tasks.filter((task) => task.status === column.key).sort((a, b) => a.position - b.position)
+          visibleTasks.filter((task) => task.status === column.key).sort((a, b) => a.position - b.position)
         ])
       ) as Record<string, TaskItem[]>,
-    [tasks, columns]
+    [visibleTasks, columns]
   )
   useEffect(() => {
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
@@ -854,6 +860,7 @@ export function TasksScreen(): JSX.Element {
             >
               <CalendarDays size={14} /> Calendário
             </button>
+            <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}><List size={14} /> Lista</button>
           </div>
           <button
             type="button"
@@ -864,6 +871,8 @@ export function TasksScreen(): JSX.Element {
           </button>
         </div>
       </header>
+      <div className="tasks-filter-bar"><label><Search size={14} /><input aria-label="Buscar tarefas" placeholder="Buscar tarefa, módulo ou responsável…" value={query} onChange={(event) => setQuery(event.target.value)} /></label><div aria-label="Filtrar tarefas por status"><button type="button" aria-pressed={!statusFilter} onClick={() => setStatusFilter(null)}>Todas <span>{tasks.length}</span></button>{columns.map((column) => <button type="button" key={column.id} aria-pressed={statusFilter === column.key} onClick={() => setStatusFilter(column.key)}>{column.name}<span>{tasks.filter((task) => task.status === column.key).length}</span></button>)}</div></div>
+      <div className="tasks-result-count" role="status">{loading ? 'Carregando tarefas…' : `${visibleTasks.length} de ${tasks.length} tarefas`}</div>
       {error && (
         <div className="tasks-error">
           <CircleAlert size={15} /> {error}
@@ -882,9 +891,9 @@ export function TasksScreen(): JSX.Element {
           </button>
         </div>
       )}
-      {view === 'calendar' ? (
+      {view === 'list' ? <div className="tasks-records"><table><thead><tr><th>Tarefa</th><th>Status</th><th>Módulo</th><th>Responsável</th><th>Prazo</th><th>Subtarefas</th></tr></thead><tbody>{visibleTasks.map((task) => <tr key={task.id}><td><button type="button" onClick={() => setModal({ task, status: task.status })}>{task.title}</button></td><td>{columns.find((column) => column.key === task.status)?.name ?? 'Status indisponível'}</td><td>{task.sapModule || '—'}</td><td>{task.assignee || '—'}</td><td>{task.dueDate ? new Date(`${task.dueDate}T12:00:00`).toLocaleDateString('pt-BR') : 'Sem prazo'}</td><td>{task.subtasks.filter((item) => item.completed).length}/{task.subtasks.length}</td></tr>)}</tbody></table>{!visibleTasks.length && !loading && <p>Nenhuma tarefa corresponde aos filtros.</p>}</div> : view === 'calendar' ? (
         <CalendarView
-          tasks={tasks}
+          tasks={visibleTasks}
           columns={columns}
           month={month}
           onOpen={(task) => setModal({ task, status: task.status })}
@@ -893,10 +902,10 @@ export function TasksScreen(): JSX.Element {
         <div
           className="tasks-board"
           style={{
-            gridTemplateColumns: `repeat(${Math.max(columns.length, 1)}, minmax(250px, 1fr))`
+            gridTemplateColumns: `repeat(${Math.max(statusFilter ? columns.filter((column) => column.key === statusFilter).length : columns.length, 1)}, minmax(250px, 1fr))`
           }}
         >
-          {columns.map((column) => (
+          {columns.filter((column) => !statusFilter || column.key === statusFilter).map((column) => (
             <section
               key={column.id}
               className="task-column"

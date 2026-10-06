@@ -168,7 +168,7 @@ export function EstimateScenarioCards({ data }: { data: EstimateData }): JSX.Ele
     [data, complexities, estimativas, clientes]
   )
   const canRecalculate =
-    loaded && data.objetosIdentificados.length > 0 && recalculation.unmatchedObjects.length === 0
+    loaded && recalculation.canRecalculate
   const displayData = canRecalculate ? recalculation.data : data
   const wasEdited = data.objetosIdentificados.some(
     (object, index) => complexities[`${index}-${object.nome}`] !== object.complexidade
@@ -249,6 +249,7 @@ export function EstimateScenarioCards({ data }: { data: EstimateData }): JSX.Ele
                       <td>{object.tipo}</td>
                       <td>
                         <select
+                          disabled={!loaded || recalculation.warnings.length > 0}
                           value={complexities[key] ?? object.complexidade}
                           onChange={(event) =>
                             setComplexities((current) => ({
@@ -274,7 +275,8 @@ export function EstimateScenarioCards({ data }: { data: EstimateData }): JSX.Ele
           {!canRecalculate && loaded && (
             <div className="estimate-recalculation-warning">
               <AlertTriangle size={13} />
-              Sem combinação exata nos parâmetros para: {recalculation.unmatchedObjects.join(', ')}.
+              {recalculation.unmatchedObjects.length > 0 && `Sem combinação exata nos parâmetros para: ${recalculation.unmatchedObjects.join(', ')}. `}
+              {recalculation.warnings.join(' ')}{' '}
               Os totais originais foram preservados.
             </div>
           )}
@@ -287,6 +289,8 @@ export function EstimateScenarioCards({ data }: { data: EstimateData }): JSX.Ele
                   : `; cliente ${data.cliente} não encontrado, fator 1,00 aplicado`
                 : '; nenhum cliente identificado, fator 1,00 aplicado'}
               .
+              {' '}O recálculo cobre Análise EF, Especificação, Codificação e Testes unitários.
+              {' '}Horas de outras atividades foram preservadas conforme a estimativa original.
             </p>
           )}
         </section>

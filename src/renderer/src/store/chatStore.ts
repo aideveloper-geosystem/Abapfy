@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { supabase } from '@renderer/lib/supabaseClient'
 import { useAuthStore } from '@renderer/store/authStore'
 import type { AgentSource } from '@renderer/store/agentsStore'
+import type { EfDocumentJob } from '@renderer/lib/efDrive'
 
 export interface ChatSummary {
   id: string
@@ -47,9 +48,10 @@ export interface ChatMeta {
 export interface PersistedToolActivity {
   id: string
   label: string
-  kind: 'skill' | 'mcp' | 'sap' | 'web' | 'source'
+  kind: 'skill' | 'mcp' | 'sap' | 'web' | 'source' | 'document'
   status: 'running' | 'confirm' | 'done' | 'error'
   url?: string
+  efDocument?: EfDocumentJob
 }
 
 export interface PersistedMessage {

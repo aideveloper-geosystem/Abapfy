@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { ChevronRight, Sparkles } from 'lucide-react'
 import './ThinkingBlock.css'
 
@@ -25,6 +25,7 @@ function formatSeconds(ms: number): string {
  */
 export function ThinkingBlock({ activeSince, text, ms = 0 }: ThinkingBlockProps): JSX.Element {
   const [open, setOpen] = useState(false)
+  const summaryId = useId()
   const [now, setNow] = useState(() => Date.now())
   const active = activeSince !== undefined
   const hasText = Boolean(text?.trim())
@@ -47,6 +48,7 @@ export function ThinkingBlock({ activeSince, text, ms = 0 }: ThinkingBlockProps)
         onClick={() => setOpen((value) => !value)}
         disabled={!hasText}
         aria-expanded={hasText ? open : undefined}
+        aria-controls={hasText ? summaryId : undefined}
       >
         <Sparkles size={13} strokeWidth={1.75} className="thinking-block-icon" />
         <span className="thinking-block-label">
@@ -61,7 +63,7 @@ export function ThinkingBlock({ activeSince, text, ms = 0 }: ThinkingBlockProps)
           />
         )}
       </button>
-      {open && hasText && <div className="thinking-block-text">{text}</div>}
+      {open && hasText && <div className="thinking-block-text" id={summaryId} role="region" aria-label="Resumo fornecido pelo modelo">{text}</div>}
     </div>
   )
 }

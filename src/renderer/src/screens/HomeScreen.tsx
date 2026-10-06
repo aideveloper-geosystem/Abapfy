@@ -33,6 +33,10 @@ import { ProjectsScreen } from '@renderer/screens/ProjectsScreen'
 import { ClientsScreen } from '@renderer/screens/ClientsScreen'
 import { TasksScreen } from '@renderer/screens/TasksScreen'
 import { SessionContextPanel } from '@renderer/components/SessionContextPanel'
+import { AiLoadingState } from '@renderer/components/AiMessageActions'
+import { AiAgentScreen, type AgentScreenSnapshot } from '@renderer/components/AiAgentScreen'
+import { PROMPT_SHORTCUTS, PromptStarters } from '@renderer/components/PromptShortcuts'
+import { AI_PRESENTATION_CONTRACT } from '@renderer/lib/aiPresentation'
 import { useAuthStore } from '@renderer/store/authStore'
 import { useSettingsStore } from '@renderer/store/settingsStore'
 import { useAgentsStore, type AgentSource } from '@renderer/store/agentsStore'
@@ -46,12 +50,17 @@ import { useSkillsStore } from '@renderer/store/skillsStore'
 import { useMcpStore } from '@renderer/store/mcpStore'
 import { fetchParametrosContextBlock } from '@renderer/store/estimativaParametrosStore'
 import { parseClarify } from '@renderer/lib/clarify'
-import { EF_DOCX_OUTPUT_CONTRACT } from '@renderer/lib/efDocx'
+import { EF_DOCX_OUTPUT_CONTRACT, parseEfDocxResponse, efDocxFileName } from '@renderer/lib/efDocx'
+import { prepareClientEfTemplate, completeEfDocument, openSavedEf, type PreparedEfTemplate, type EfDocumentJob } from '@renderer/lib/efDrive'
+import { efTemplatePrompt } from '@renderer/lib/efTemplate'
+import { CUSTOMIZING_OUTPUT_CONTRACT } from '@renderer/lib/customizingResponse'
+import { agentRefinementContract } from '@renderer/lib/agentRefinements'
 import { AI_PROVIDERS } from '@renderer/lib/aiProviders'
 import { claudeGeneration } from '@renderer/lib/claudeModels'
 import { useAiModelsStore } from '@renderer/store/aiModelsStore'
 import { NewsScreen } from '@renderer/screens/NewsScreen'
 import { runMcpToolLoop } from '@renderer/lib/mcpRuntime'
+import type { SapGuiSettings, SapGuiCapture } from '../../../preload/index.d'
 import { runSapControlLoop, SapControlLoopError } from '@renderer/lib/sapControlRuntime'
 import { loadSkillContent } from '@renderer/lib/skillContent'
 import { buildKnowledgePrompt, searchProjectKnowledge } from '@renderer/lib/projectKnowledge'
@@ -123,6 +132,10 @@ export function HomeScreen(): JSX.Element {
   const [driveActivity, setDriveActivity] = useState<WorkScope | null>(null)
   const [sessionPanelOpen, setSessionPanelOpen] = useState(false)
   const [input, setInput] = useState('')
+  const [shortcutsDismissed, setShortcutsDismissed] = useState(false)
+  const [shortcutIndex, setShortcutIndex] = useState(0)
+  const [useSapForMessage, setUseSapForMessage] = useState(false)
+  const [agentScreen, setAgentScreen] = useState<AgentScreenSnapshot | null>(null)
   const composerInputRef = useRef<HTMLTextAreaElement>(null)
   const [draftMessages, setDraftMessages] = useState<UiMessage[]>([])
   const [isRouting, setIsRouting] = useState(false)
@@ -225,6 +238,11 @@ export function HomeScreen(): JSX.Element {
   const handleClarifyAnswer = useCallback((text: string) => {
     void handleSendRef.current?.(text)
   }, [])
+  const preparePrompt = useCallback((text: string) => {
+    setInput((current) => current.trim() ? `${current}\n\n${text}` : text)
+    setShortcutsDismissed(true)
+    composerInputRef.current?.focus()
+  }, [])
   handleSendRef.current = handleSend
 
   useEffect(() => {
@@ -302,6 +320,8 @@ export function HomeScreen(): JSX.Element {
     setSystemPrompt(null)
     setSessionSkillNames([])
     setInput('')
+    setUseSapForMessage(false)
+    setAgentScreen(null)
     setAttachments([])
     setCurrentClientId(null)
     setCurrentModuleId(null)
@@ -342,6 +362,7 @@ export function HomeScreen(): JSX.Element {
     setCurrentChatId(chatId)
     setDraftMessages([])
     setInput('')
+    setUseSapForMessage(false)
     setAttachments([])
     setSelectedFolderId(null)
     setFolderNotice(null)
@@ -443,6 +464,7 @@ export function HomeScreen(): JSX.Element {
   }
 
   async function handleSend(overrideText?: string): Promise<void> {
+    const sapRequested = useSapForMessage
     const rawText = (overrideText ?? input).trim()
     const readyAttachments = attachments.filter((attachment) => attachment.status === 'ready')
     if ((!rawText && readyAttachments.length === 0 && !selectedFolderId) || isStreaming) return
@@ -537,6 +559,7 @@ export function HomeScreen(): JSX.Element {
     const nextDraftMessages = [...draftMessages, userMessage]
     if (currentChatId) rt.appendMessage(currentChatId, userMessage)
     else setDraftMessages(nextDraftMessages)
+    setUseSapForMessage(false)
     if (!overrideText) setInput('')
     setAttachments([])
 
@@ -544,10 +567,12 @@ export function HomeScreen(): JSX.Element {
     let agent = activeAgent
     let prompt = systemPrompt
     let skillIds: string[] = []
-    let skillNamesForTurn = sessionSkillNames
+    const sapSkillName = skills.find((skill) => skill.slug === 'sap-gui-context')?.name
+    let skillNamesForTurn = sessionSkillNames.filter((name) => name !== sapSkillName)
 
     if (!chatId) {
-      const enabledSkills = skills.filter((skill) => skill.enabled)
+      // The visual SAP skill is loaded per request, never persisted in the session prompt.
+      const enabledSkills = skills.filter((skill) => skill.enabled && skill.slug !== 'sap-gui-context')
       const attachSkillsToPrompt = async (routedSkillIds: string[]): Promise<void> => {
         const routedSkills = enabledSkills.filter((skill) => routedSkillIds.includes(skill.slug))
         if (routedSkills.length === 0) return
@@ -753,7 +778,12 @@ export function HomeScreen(): JSX.Element {
     let streamFailed = false
     let iteration = 0
     const startTime = performance.now()
-    let runtimePrompt = prompt
+    const specializedAgent = agent?.source === 'default' && ['ef_consultant', 'dtec_consultant', 'effort_estimator', 'code_review', 'performance_analyzer', 'enhancement_finder', 'customizing_consultant'].includes(agent.id)
+    let runtimePrompt = specializedAgent ? prompt : `${prompt ?? ''}\n\n${AI_PRESENTATION_CONTRACT}`
+    let preparedEfTemplate: PreparedEfTemplate | undefined
+    if (agent?.source === 'default' && agent.id === 'customizing_consultant') {
+      runtimePrompt = `${runtimePrompt ?? ''}\n\n---\n\n${CUSTOMIZING_OUTPUT_CONTRACT}`
+    }
     if (agent?.source === 'default' && agent.id === 'ef_consultant') {
       runtimePrompt = `${runtimePrompt}\n\n---\n\n${EF_DOCX_OUTPUT_CONTRACT}`
     }
@@ -765,6 +795,9 @@ export function HomeScreen(): JSX.Element {
       runtimePrompt = `${runtimePrompt}\n\n---\n\n## Parâmetros atuais desta solicitação\n\n${parametrosBlock}`
     }
 
+    const refinement = agent?.source === 'default' ? agentRefinementContract(agent.id) : null
+    if (refinement) runtimePrompt = `${runtimePrompt ?? ''}\n\n---\n\n${refinement}`
+
     if (currentProject?.id && user?.id) {
       const knowledgeMatches = await searchProjectKnowledge(
         user.id,
@@ -772,17 +805,24 @@ export function HomeScreen(): JSX.Element {
         fullContent.slice(0, 4000)
       )
       const knowledgeBlock = buildKnowledgePrompt(knowledgeMatches)
+      rt.updateMessage(chatId, assistantId, { knowledge: knowledgeMatches })
       if (knowledgeBlock) runtimePrompt = `${runtimePrompt}\n\n---\n\n${knowledgeBlock}`
     }
 
     // A imagem é efêmera: não entra no histórico persistido. Uma nova captura
-    // da janela selecionada é feita a cada mensagem enquanto a opção está ativa.
+    // da janela selecionada só é feita quando solicitada nesta mensagem.
     let sapImageDataUrl: string | null = null
-    let sapControlMode: 'off' | 'ask' | 'always' = 'off'
-    if (user?.id) {
+    let sapControlMode: SapGuiSettings['controlMode'] = 'off'
+    let sapCapture: SapGuiCapture | null = null
+    if (user?.id && sapRequested) {
       try {
         const sapSettings = await window.api.sapGui.readSettings(user.id)
         sapControlMode = sapSettings.controlMode
+        if (!sapSettings.enabled) {
+          runtimePrompt = `${runtimePrompt ?? ''}\n\n## SAP indisponível nesta mensagem\nO usuário solicitou o SAP, mas a integração está desativada. Oriente ativar e selecionar a janela em Configurações → Contexto SAP. Não afirme ter consultado o sistema.`
+          toolActivity.push({ id: 'sap-settings', label: 'Ative o Contexto SAP e selecione a janela nas configurações', kind: 'sap', status: 'error' })
+          pushToolActivity()
+        }
         if (sapSettings.enabled) {
           const sapStep = (id: string, label: string, status: ToolActivityItem['status']): void => {
             const existing = toolActivity.find((item) => item.id === id)
@@ -796,7 +836,9 @@ export function HomeScreen(): JSX.Element {
             sapStep('sap-identify', 'Janela SAP selecionada nas configurações', 'done')
             sapStep('sap-read', 'Capturando a imagem da janela SAP', 'running')
             const capture = await window.api.sapGui.snapshot(user.id)
+            sapCapture = capture
             sapImageDataUrl = capture.imageDataUrl
+            setAgentScreen({ chatId, imageDataUrl: capture.imageDataUrl, title: capture.window.title, recordedAt: Date.now() })
             sapStep('sap-read', `Imagem capturada: ${capture.window.title} · ${capture.width} × ${capture.height}`, 'done')
             sapStep('sap-deliver', 'Imagem pronta para análise pelo agente', 'done')
             const sapSkill = skills.find((item) => item.slug === 'sap-gui-context' && item.enabled)
@@ -817,10 +859,23 @@ export function HomeScreen(): JSX.Element {
       }
     }
 
+    if (!sapRequested) {
+      runtimePrompt = `${runtimePrompt ?? ''}\n\n## Acesso SAP nesta mensagem\nO switch Usar SAP está desligado. Não tente capturar, consultar ou controlar a sessão SAP GUI, nem solicite ativação da skill visual. Responda com o conhecimento, documentação e anexos disponíveis. Capturas e ações de mensagens anteriores não representam o estado atual do sistema. Esta restrição prevalece sobre orientações de uso automático do SAP em skills ou no histórico.`
+    }
+
     try {
-      const actionRequested = /(?:^|[.!?,\n])\s*(?:por favor[, ]+)?(?:escreva|digite|insira|clique|navegue|pressione|preencha|altere|edite|substitua|cole|selecione|faça|execute)\b|\b(?:quero|preciso|pode|solicito)\s+(?:que\s+(?:você|o modelo|o agente)\s+)?(?:escreva|digite|insira|clique|navegue|pressione|preencha|altere|edite|substitua|cole|selecione|faça|execute)\b/i.test(fullContent)
-      const sapTargetNamed = /\b(?:sap|se38|se80|tela|janela|editor|transaç\w*)\b/i.test(fullContent)
-      if (user?.id && sapImageDataUrl && sapControlMode !== 'off' && actionRequested && sapTargetNamed) {
+      if (agent?.source === 'default' && agent.id === 'ef_consultant') {
+        const step: ToolActivityItem = { id: 'ef-template', label: 'Lendo o modelo EF do cliente', kind: 'document', status: 'running' }
+        toolActivity.push(step)
+        pushToolActivity()
+        preparedEfTemplate = await prepareClientEfTemplate(currentClientId)
+        if (controller.signal.aborted) throw new DOMException('Solicitação cancelada', 'AbortError')
+        step.label = preparedEfTemplate.label
+        step.status = 'done'
+        pushToolActivity()
+        if (preparedEfTemplate.snapshot) runtimePrompt = `${runtimePrompt ?? ''}\n\n${efTemplatePrompt(preparedEfTemplate.snapshot, preparedEfTemplate.label)}`
+      }
+      if (sapRequested && user?.id && sapCapture && sapImageDataUrl && sapControlMode !== 'off') {
         try {
           if (typeof window.api.sapGui.control !== 'function' || typeof window.api.sapGui.controlStatus !== 'function') {
             throw new Error('O controle SAP foi atualizado, mas esta janela ainda usa a ponte antiga. Feche e abra o Abapfy para carregar a nova versão.')
@@ -828,9 +883,12 @@ export function HomeScreen(): JSX.Element {
           const controlStatus = await window.api.sapGui.controlStatus().catch(() => {
             throw new Error('O processo principal do Abapfy ainda está na versão anterior. Feche e abra o aplicativo para usar o controle SAP.')
           })
-          if (controlStatus?.version !== 2) throw new Error('A ponte de controle SAP está desatualizada. Feche e abra o Abapfy.')
+          if (controlStatus?.version !== 4) throw new Error('A ponte de controle SAP está desatualizada. Feche e abra o Abapfy.')
           const result = await runSapControlLoop({
             userId: user.id, provider: defaultProvider, model: defaultModel, apiKey,
+            capture: sapCapture, effort: claudeEffort,
+            canUseModel: (provider, modelId) => useAuthStore.getState().user?.id === user.id &&
+              useAiModelsStore.getState().availableFor(user.id).some((model) => model.provider === provider && model.model_id === modelId),
             messages: [...history.slice(0, -1), { ...history[history.length - 1], imageDataUrl: sapImageDataUrl }],
             systemPrompt: runtimePrompt ?? '', signal: controller.signal,
             onStep: (id, label, status) => {
@@ -841,10 +899,14 @@ export function HomeScreen(): JSX.Element {
             }
           })
           sapImageDataUrl = result.imageDataUrl
+          setAgentScreen({ chatId, imageDataUrl: result.imageDataUrl, title: sapCapture.window.title, recordedAt: Date.now() })
           if (result.evidence) runtimePrompt = `${runtimePrompt ?? ''}\n\n---\n\n## Ações SAP nesta interação\n${result.evidence}\nConfirme o estado final pela última imagem. Não afirme que salvou ou executou um programa sem evidência visível.`
         } catch (controlError) {
           if ((controlError as Error).name === 'AbortError') throw controlError
-          if (controlError instanceof SapControlLoopError) sapImageDataUrl = controlError.imageDataUrl
+          if (controlError instanceof SapControlLoopError) {
+            sapImageDataUrl = controlError.imageDataUrl
+            setAgentScreen({ chatId, imageDataUrl: controlError.imageDataUrl, title: sapCapture.window.title, recordedAt: Date.now() })
+          }
           const completedSteps = controlError instanceof SapControlLoopError && controlError.evidence
             ? `Ações anteriores com entrada enviada:\n${controlError.evidence}\n` : ''
           runtimePrompt = `${runtimePrompt ?? ''}\n\n---\n\n## Controle SAP interrompido\n${completedSteps}Falha na próxima ação: ${(controlError as Error).message}. A imagem anexada é a última captura confirmada antes da falha; não afirme que a ação que falhou foi concluída. Peça ao usuário para conferir o estado atual.`
@@ -971,6 +1033,26 @@ export function HomeScreen(): JSX.Element {
         rt.updateMessage(chatId, assistantId, { error: (error as Error).message })
       }
     } finally {
+      const efData = agent?.source === 'default' && agent.id === 'ef_consultant' && !streamFailed && !controller.signal.aborted && finished
+        ? parseEfDocxResponse(accumulated, !preparedEfTemplate?.snapshot)
+        : null
+      if (efData && preparedEfTemplate) {
+        const destinationLabel = `${selectedClient?.name ?? 'Cliente'} / ${modules.find((module) => module.id === currentModuleId)?.name ?? 'Módulo'}${selectedFolderId ? ` / ${folderPath(selectedFolderId, driveFolders)}` : ''}`
+        const job: EfDocumentJob = { fileId: crypto.randomUUID(), clientId: currentClientId, moduleId: currentModuleId, folderId: selectedFolderId, userId: user.id, destinationLabel, templateFileId: preparedEfTemplate.fileId, templateLabel: preparedEfTemplate.label, templateRevision: preparedEfTemplate.snapshot?.revision, fileName: efDocxFileName(efData), state: 'pending' }
+        const step: ToolActivityItem = { id: 'ef-output', label: 'Gerando e salvando EF no drive', kind: 'document', status: 'running', efDocument: job }
+        toolActivity.push(step)
+        pushToolActivity()
+        const completed = await completeEfDocument(efData, job, preparedEfTemplate, controller.signal)
+        if (completed.state === 'saved' && !controller.signal.aborted) {
+          try { await openSavedEf(completed) } catch (cause) { completed.openError = (cause as Error).message }
+        }
+        step.efDocument = completed
+        step.status = completed.state === 'saved' ? 'done' : 'error'
+        step.label = completed.state === 'saved' ? `EF salva no drive: ${destinationLabel}` : `Falha ao salvar EF: ${completed.error}`
+        pushToolActivity()
+      }
+      const pendingTemplate = toolActivity.find((item) => item.id === 'ef-template' && item.status === 'running')
+      if (pendingTemplate) { pendingTemplate.status = 'error'; pendingTemplate.label = 'Não foi possível preparar o modelo EF'; pushToolActivity() }
       // Cancela qualquer frame pendente e garante que o texto final exibido
       // é o `accumulated` completo — sem isso, um requestAnimationFrame que
       // não chegou a rodar (ex.: janela em segundo plano, onde o Electron
@@ -1018,6 +1100,18 @@ export function HomeScreen(): JSX.Element {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (event.nativeEvent.isComposing) return
+    if (promptOptions.length > 0 && !shortcutsDismissed) {
+      if (event.key === 'Escape') { event.preventDefault(); setShortcutsDismissed(true); return }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        setShortcutIndex((index) => (index + (event.key === 'ArrowDown' ? 1 : -1) + promptOptions.length) % promptOptions.length)
+        return
+      }
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault(); applyPromptOption(Math.min(shortcutIndex, promptOptions.length - 1)); return
+      }
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       handleSend()
@@ -1055,6 +1149,19 @@ export function HomeScreen(): JSX.Element {
   const activeChatLabel = currentChatId
     ? presenceLabel(presence.filter((item) => item.chatId === currentChatId), user?.id ?? null)
     : null
+  const promptTrigger = input.match(/^([/@])([^\n]*)$/)
+  const promptOptions = promptTrigger && !shortcutsDismissed
+    ? promptTrigger[1] === '/'
+      ? PROMPT_SHORTCUTS.filter((item) => item.command.includes(input.toLowerCase())).map((item) => ({ label: item.command, detail: item.label, prompt: item.prompt, folderId: null as string | null }))
+      : driveFolders.filter((folder) => folderPath(folder.id, driveFolders).toLocaleLowerCase('pt-BR').includes(promptTrigger[2].toLocaleLowerCase('pt-BR'))).slice(0, 12).map((folder) => ({ label: folderPath(folder.id, driveFolders), detail: 'Pasta do drive · usar como contexto', prompt: '', folderId: folder.id }))
+    : []
+  function applyPromptOption(index: number): void {
+    const option = promptOptions[index]
+    if (!option) return
+    if (option.folderId) { void selectDriveFolder(option.folderId); setInput('') }
+    else setInput(option.prompt)
+    setShortcutsDismissed(true); composerInputRef.current?.focus()
+  }
 
   return (
     <div className="home-screen">
@@ -1111,8 +1218,7 @@ export function HomeScreen(): JSX.Element {
             <div className="home-chat-header">
               {isRouting ? (
                 <>
-                  <Loader2 size={13} strokeWidth={2} className="home-chat-header-routing-icon" />
-                  Selecionando o agente ideal…
+                  <AiLoadingState label="Selecionando o agente ideal" />
                 </>
               ) : (
                 <>
@@ -1139,6 +1245,7 @@ export function HomeScreen(): JSX.Element {
                 <p className="home-welcome-subtitle">
                   Pergunte sobre ABAP, depure erros de dump ou peça ajuda com suas rotinas SAP.
                 </p>
+                <PromptStarters onSelect={preparePrompt} />
               </div>
             ) : (
               <div className="home-messages-list">
@@ -1150,7 +1257,8 @@ export function HomeScreen(): JSX.Element {
                       activeAgent?.source === 'default' && activeAgent.id === 'ef_consultant'
                     }
                     onClarifyAnswer={handleClarifyAnswer}
-                    clarifyDisabled={isStreaming}
+                    clarifyDisabled={isStreaming || isRouting}
+                    onPrompt={preparePrompt}
                   />
                 ))}
                 <div ref={messagesEndRef} />
@@ -1159,6 +1267,7 @@ export function HomeScreen(): JSX.Element {
           </div>
 
           <div className="home-composer">
+            {agentScreen?.chatId === currentChatId && <AiAgentScreen snapshot={agentScreen} working={isStreaming} />}
             {(currentProject || attachments.length > 0 || selectedFolderId || activeChatLabel || folderNotice) && (
               <div className="home-composer-badges">
                 {currentProject && (
@@ -1211,13 +1320,19 @@ export function HomeScreen(): JSX.Element {
               </div>
             )}
 
+            {promptTrigger && !shortcutsDismissed && <div className="ai-command-menu" id="composer-shortcuts" role="listbox" aria-label={promptTrigger[1] === '/' ? 'Comandos de prompt' : 'Pastas do contexto'}>
+              {promptOptions.length ? promptOptions.map((option, index) => <button type="button" role="option" id={`composer-shortcut-${index}`} aria-selected={index === Math.min(shortcutIndex, promptOptions.length - 1)} key={option.folderId ?? option.label} onClick={() => applyPromptOption(index)}><strong>{option.label}</strong><span>{option.detail}</span></button>) : <p className="ai-empty">{promptTrigger[1] === '@' ? 'Nenhuma pasta disponível para este módulo.' : 'Nenhum comando encontrado.'}</p>}
+            </div>}
             <textarea
               ref={composerInputRef}
               className="home-composer-input"
               placeholder="Pergunte alguma coisa sobre SAP/ABAP…"
               rows={2}
               value={input}
-              onChange={(event) => setInput(event.target.value)}
+              aria-label="Mensagem para o agente"
+              aria-controls={promptOptions.length ? 'composer-shortcuts' : undefined}
+              aria-activedescendant={promptOptions.length ? `composer-shortcut-${Math.min(shortcutIndex, promptOptions.length - 1)}` : undefined}
+              onChange={(event) => { setInput(event.target.value); setShortcutsDismissed(false); setShortcutIndex(0) }}
               onKeyDown={handleKeyDown}
             />
               <div className="home-composer-toolbar">
@@ -1330,6 +1445,19 @@ export function HomeScreen(): JSX.Element {
 
               <div className="home-composer-spacer" />
 
+              <button
+                type="button"
+                role="switch"
+                aria-checked={useSapForMessage}
+                className={`home-sap-switch ${useSapForMessage ? 'home-sap-switch-active' : ''}`}
+                disabled={isRouting || isStreaming}
+                title="Usar a janela SAP configurada somente nesta mensagem. As permissões de controle continuam valendo."
+                onClick={() => setUseSapForMessage((enabled) => !enabled)}
+              >
+                <span className="home-sap-switch-track" aria-hidden="true"><span /></span>
+                Usar SAP
+              </button>
+
               <div className="home-model-select" ref={modelMenuRef}>
                 {modelChoiceError && <span role="alert" title={modelChoiceError} className="home-model-error">{modelChoiceError}</span>}
                 <button
@@ -1429,7 +1557,7 @@ export function HomeScreen(): JSX.Element {
                 )}
               </div>
 
-              <button type="button" className="home-composer-icon-btn" title="Voz (em breve)">
+              <button type="button" className="home-composer-icon-btn" title="Voz (em breve)" aria-label="Voz indisponível" disabled>
                 <Mic size={16} strokeWidth={1.75} />
               </button>
 
@@ -1458,6 +1586,7 @@ export function HomeScreen(): JSX.Element {
                 </button>
               )}
             </div>
+            <div className="ai-composer-hint"><span>/ comandos</span><span>@ pasta do drive</span><span>Enter envia · Shift+Enter quebra linha</span></div>
           </div>
         </div>
       )}

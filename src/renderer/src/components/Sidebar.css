@@ -417,3 +417,17 @@
     transform: translateY(0);
   }
 }
+.sidebar-workspace-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 16px 0; color: var(--color-ink-tertiary); font: 11px var(--font-text); }
+.sidebar-workspace-header button { display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--radius-md); color: var(--color-ink-muted); }
+.sidebar-workspace-header button:hover { background: var(--color-surface-3); color: var(--color-primary); }
+.sidebar-search { display: flex; align-items: center; gap: 6px; padding: 6px 10px; margin: 0 12px; border: 1px solid var(--color-hairline); border-radius: var(--radius-md); background: var(--color-surface-2); color: var(--color-ink-muted); }
+.sidebar-search input { width: 100%; min-width: 0; border: 0; outline: none; background: transparent; color: var(--color-ink); font: 11px var(--font-text); }
+.sidebar-collapsed { width: 64px; min-width: 64px; }
+.sidebar-collapsed .sidebar-workspace-header { justify-content: center; padding: 10px 0 0; }
+.sidebar-collapsed .sidebar-workspace-header > span, .sidebar-collapsed .sidebar-shortcut > span, .sidebar-collapsed .sidebar-scroll, .sidebar-collapsed .sidebar-user-info, .sidebar-collapsed .sidebar-user-chevron { display: none; }
+.sidebar-collapsed .sidebar-shortcuts { padding: 10px 8px; }
+.sidebar-collapsed .sidebar-shortcut { justify-content: center; min-height: 38px; padding: 8px; }
+.sidebar-collapsed .sidebar-user { margin-top: auto; padding: 8px; }
+.sidebar-collapsed .sidebar-user-trigger { justify-content: center; padding: 0; }
+.sidebar-collapsed .sidebar-user-menu { width: 230px; left: 4px; z-index: 30; }
+.sidebar button:focus-visible, .sidebar-search:focus-within { outline: 2px solid var(--color-primary-focus); outline-offset: 2px; }

@@ -115,3 +115,8 @@
   font-size: 11px;
   color: var(--color-semantic-success);
 }
+.clarify-option[aria-pressed=true] { background: var(--color-surface-3); border-color: var(--color-primary); color: var(--color-primary); }
+.clarify-continue { display: flex; align-items: center; gap: 6px; margin-top: 10px; padding: 7px 10px; border-radius: var(--radius-md); background: var(--color-primary); color: var(--color-on-primary); font: 12px var(--font-text); }
+.clarify-continue:disabled { opacity: .5; cursor: default; }
+.clarify-continue:focus-visible, .clarify-option:focus-visible { outline: 2px solid var(--color-primary-focus); outline-offset: 2px; }
+.clarify-answered { display: inline-flex; align-items: center; gap: 5px; }

@@ -41,6 +41,8 @@ export interface EstimateRecalculation {
   data: EstimateData
   unmatchedObjects: string[]
   clientMatched: boolean
+  canRecalculate: boolean
+  warnings: string[]
 }
 
 function asString(value: unknown, fallback = ''): string {
@@ -69,8 +71,9 @@ function roundHours(value: number): number {
   return Math.round(value * 10) / 10
 }
 
-function scenarioMultiplier(key: 'agressiva' | 'segura' | 'tranquila', value: number): number {
-  if (value > 0) return value
+function scenarioMultiplier(key: 'agressiva' | 'segura' | 'tranquila'): number {
+  // The three scenarios have fixed factors; model-supplied factors cannot
+  // silently change the deterministic pricing contract.
   return key === 'agressiva' ? 0.75 : key === 'segura' ? 1 : 1.35
 }
 
@@ -98,6 +101,7 @@ export function recalculateEstimate(
   clients: ClienteParametro[]
 ): EstimateRecalculation {
   const unmatchedObjects: string[] = []
+  const warnings: string[] = []
   const base = { analise_ef: 0, espec: 0, codific: 0, testes: 0, outros: 0 }
 
   const objects = original.objetosIdentificados.map((object, index) => {
@@ -106,6 +110,13 @@ export function recalculateEstimate(
     const parameter = findEstimateParameter(object, complexidade, parameters)
     if (!parameter) unmatchedObjects.push(object.nome)
     else {
+      if (
+        [parameter.analiseEf, parameter.espec, parameter.codific, parameter.testes].some(
+          (hours) => !Number.isFinite(hours) || hours < 0
+        )
+      ) {
+        warnings.push(`Parâmetros de horas inválidos para ${object.nome}.`)
+      }
       base.analise_ef += parameter.analiseEf
       base.espec += parameter.espec
       base.codific += parameter.codific
@@ -126,11 +137,27 @@ export function recalculateEstimate(
   }
 
   const estimativas = { ...original.estimativas }
+  if (Object.values(factoredBase).some((hours) => !Number.isFinite(hours) || hours < 0)) {
+    warnings.push('Fatores do cliente inválidos. Revise os parâmetros antes de recalcular.')
+  }
   ;(['agressiva', 'segura', 'tranquila'] as const).forEach((key) => {
-    const multiplier = scenarioMultiplier(key, original.estimativas[key].multiplicador)
+    const previous = original.estimativas[key]
+    const sum = Object.values(previous.distribuicao).reduce(
+      (total, hours) => total + (hours ?? 0),
+      0
+    )
+    if (Math.abs(previous.totalHoras - sum) > 0.2) {
+      warnings.push(
+        `Cenário ${key}: o total informado não corresponde à distribuição. Revise as fases antes de recalcular.`
+      )
+    }
+    const multiplier = scenarioMultiplier(key)
     const distribuicao = Object.fromEntries(
       Object.entries(factoredBase).map(([phase, hours]) => [phase, roundHours(hours * multiplier)])
     ) as EstimateDistribution
+    // Additional activities have their own source and are independent of the
+    // editable object complexity. Preserve each scenario's hours as supplied.
+    distribuicao.outros = previous.distribuicao.outros ?? 0
     estimativas[key] = {
       ...original.estimativas[key],
       multiplicador: multiplier,
@@ -141,10 +168,14 @@ export function recalculateEstimate(
     }
   })
 
+  const canRecalculate =
+    objects.length > 0 && unmatchedObjects.length === 0 && warnings.length === 0
   return {
-    data: { ...original, objetosIdentificados: objects, estimativas },
+    data: canRecalculate ? { ...original, objetosIdentificados: objects, estimativas } : original,
     unmatchedObjects,
-    clientMatched: Boolean(client)
+    clientMatched: Boolean(client),
+    canRecalculate,
+    warnings
   }
 }
 
@@ -152,11 +183,18 @@ function parseScenario(value: unknown): EstimateScenario | null {
   if (!value || typeof value !== 'object') return null
   const raw = value as Record<string, unknown>
   if (typeof raw.total_horas !== 'number') return null
+  if (!Number.isFinite(raw.total_horas) || raw.total_horas < 0) return null
 
   const distribuicaoRaw =
     raw.distribuicao && typeof raw.distribuicao === 'object'
       ? (raw.distribuicao as Record<string, unknown>)
       : {}
+  if (
+    Object.values(distribuicaoRaw).some(
+      (hours) => typeof hours !== 'number' || !Number.isFinite(hours) || hours < 0
+    )
+  )
+    return null
 
   return {
     totalHoras: asNumber(raw.total_horas),

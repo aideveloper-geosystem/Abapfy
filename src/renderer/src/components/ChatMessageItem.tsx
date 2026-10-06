@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, useRef } from 'react'
 import { AlertCircle, Bot, CheckCircle2, FileText, Globe, Loader2, Monitor, RefreshCw, XCircle } from 'lucide-react'
 import { Markdown } from './Markdown'
 import { EfDocxGenerator } from './EfDocxGenerator'
@@ -13,14 +13,21 @@ import { parseEfDocxResponse } from '@renderer/lib/efDocx'
 import { parseStructuredJson, extractSoleJsonBlock } from '@renderer/lib/structuredResponse'
 import { parseEstimateData } from '@renderer/lib/estimateCards'
 import { parseClarify } from '@renderer/lib/clarify'
+import { customizingMarkdown, isCustomizingResponse } from '@renderer/lib/customizingResponse'
+import { technicalResponseKind } from '@renderer/lib/technicalResponse'
+import { TechnicalResponse } from './TechnicalResponse'
+import { AiLoadingState, AiMessageActions } from './AiMessageActions'
+import type { EfDocumentJob } from '@renderer/lib/efDrive'
+import type { KnowledgeMatch } from '@renderer/lib/projectKnowledge'
 
 export interface ToolActivityItem {
   id: string
   label: string
   /** web = pesquisa/leitura via server tools do Claude; source = fonte citada na resposta. */
-  kind: 'skill' | 'mcp' | 'sap' | 'web' | 'source'
+  kind: 'skill' | 'mcp' | 'sap' | 'web' | 'source' | 'document'
   status: 'running' | 'confirm' | 'done' | 'error'
   url?: string
+  efDocument?: EfDocumentJob
 }
 
 export interface UiMessage {
@@ -44,12 +51,18 @@ export interface UiMessage {
   thinkingMs?: number
   /** Date.now() do início do bloco de thinking em andamento. */
   thinkingSince?: number
+  knowledge?: KnowledgeMatch[]
 }
 
 function ToolActivityBadges({ items }: { items: ToolActivityItem[] }): JSX.Element {
   const sapItems = items.filter((item) => item.kind === 'sap')
+  const activity = items.filter((item) => item.kind !== 'source')
+  const needsAttention = activity.some((item) => item.status !== 'done')
+  const status = activity.some((item) => item.status === 'confirm') ? 'Aguardando autorização' : activity.some((item) => item.status === 'running') ? 'Em andamento' : activity.some((item) => item.status === 'error') ? 'Com interrupções' : 'Concluída'
   return (
-    <>
+    <details className="ai-tool-details" open={needsAttention || undefined}>
+    <summary><Bot size={13} /> Atividade · {activity.length} {activity.length === 1 ? 'etapa' : 'etapas'} · {status}</summary>
+    <div>
     {sapItems.length > 0 && <div className={`chat-sap-activity ${sapItems.some((item) => item.status === 'running') ? 'chat-sap-activity-live' : ''}`}>
       <div className="chat-sap-activity-heading"><Monitor size={14} /> Contexto SAP <span>{sapItems.some((item) => item.status === 'confirm') ? 'aguardando autorização' : sapItems.some((item) => item.status === 'running') ? 'interagindo com SAP' : sapItems.some((item) => item.status === 'error') ? 'ação interrompida' : 'pronto'}</span></div>
       <div className="chat-sap-activity-steps">{sapItems.map((item) => <div key={item.id} className={`chat-sap-activity-step chat-sap-activity-step-${item.status}`}>
@@ -73,21 +86,24 @@ function ToolActivityBadges({ items }: { items: ToolActivityItem[] }): JSX.Eleme
         </span>
       ))}
     </div>
-    </>
+    </div>
+    </details>
   )
 }
 
 function SourceLinks({ items }: { items: ToolActivityItem[] }): JSX.Element {
   return (
-    <div className="chat-sources">
-      <span className="chat-sources-title">Fontes</span>
+    <details className="ai-tool-details">
+      <summary><Globe size={13} /> Fontes · {items.length}</summary>
+      <div className="chat-sources">
       {items.map((item) => (
         <a key={item.id} className="chat-source-link" href={item.url} target="_blank" rel="noreferrer" title={item.url}>
           <Globe size={11} strokeWidth={1.75} />
           <span>{item.label}</span>
         </a>
       ))}
-    </div>
+      </div>
+    </details>
   )
 }
 
@@ -96,6 +112,7 @@ interface ChatMessageItemProps {
   efDocumentMode?: boolean
   onClarifyAnswer?: (text: string) => void
   clarifyDisabled?: boolean
+  onPrompt?: (text: string) => void
 }
 
 // Sem memo, toda mensagem do histórico re-renderiza (e o Markdown de cada
@@ -108,8 +125,10 @@ export const ChatMessageItem = memo(function ChatMessageItem({
   message,
   efDocumentMode = false,
   onClarifyAnswer,
-  clarifyDisabled
+  clarifyDisabled,
+  onPrompt
 }: ChatMessageItemProps): JSX.Element {
+  const contentRef = useRef<HTMLDivElement>(null)
   const isUser = message.role === 'user'
   const hasStats =
     !message.streaming && (message.elapsedMs !== undefined || message.tokensInput !== undefined)
@@ -130,10 +149,12 @@ export const ChatMessageItem = memo(function ChatMessageItem({
       ? parseEstimateData(extractSoleJsonBlock(message.content))
       : null
   const structured =
-    !isUser && !message.streaming && !clarify && !efDocx && !estimate
+    !isUser && !message.streaming && !clarify && !efDocx && !estimate && !/^```ai-ui\s/.test(message.content.trim())
       ? parseStructuredJson(message.content)
       : null
-  const sources = message.toolActivity?.filter((item) => item.kind === 'source' && item.url) ?? []
+  const sources = message.toolActivity?.filter((item) => item.kind === 'source' && item.url && /^https?:\/\//i.test(item.url)) ?? []
+  const technicalKind = structured ? technicalResponseKind(structured) : null
+  const efJob = message.toolActivity?.find((item) => item.kind === 'document' && item.efDocument)?.efDocument
 
   return (
     <div className={`chat-message ${isUser ? 'chat-message-user' : 'chat-message-assistant'}`}>
@@ -168,7 +189,8 @@ export const ChatMessageItem = memo(function ChatMessageItem({
           {parsedUser?.text && <p className="chat-message-user-content">{parsedUser.text}</p>}
         </div>
       ) : (
-        <div className="chat-message-assistant-content">
+        <div className="chat-message-assistant-content" ref={contentRef}>
+          {!!message.knowledge?.length && <details className="ai-tool-details"><summary><FileText size={13} /> Contexto consultado · {message.knowledge.length} trechos</summary><div className="ai-knowledge-cards">{message.knowledge.map((match, index) => <article key={`${match.documentId}-${index}`}><strong>{match.documentName}</strong><small>Versão {match.version} · {new Date(match.updatedAt).toLocaleDateString('pt-BR')} · relevância {Math.round(match.confidence * 100)}%</small><p>{match.excerpt}</p></article>)}</div></details>}
           {message.toolActivity?.some((item) => item.kind !== 'source') && (
             <ToolActivityBadges items={message.toolActivity} />
           )}
@@ -183,20 +205,27 @@ export const ChatMessageItem = memo(function ChatMessageItem({
               disabled={clarifyDisabled}
             />
           ) : efDocx ? (
-            <EfDocxGenerator data={efDocx} />
+            <EfDocxGenerator data={efDocx} job={efJob} />
           ) : estimate ? (
             <EstimateScenarioCards data={estimate} />
           ) : structured && /dtec/i.test(message.agentName ?? '') ? (
             <DtecDocument data={structured} />
+          ) : structured && isCustomizingResponse(structured) ? (
+            <Markdown content={customizingMarkdown(structured)} />
+          ) : structured && technicalKind ? (
+            <TechnicalResponse data={structured} kind={technicalKind} />
           ) : structured ? (
             <StructuredJson data={structured} />
           ) : (
             <Markdown
               content={message.content}
+              deferEfDocument={message.streaming}
               onClarifyAnswer={onClarifyAnswer}
               clarifyDisabled={clarifyDisabled}
+              onPrompt={onPrompt}
             />
           )}
+          {message.streaming && !message.content && message.thinkingSince === undefined && <AiLoadingState />}
           {sources.length > 0 && !message.streaming && <SourceLinks items={sources} />}
           {message.streaming && message.thinkingSince === undefined && (
             <span className="chat-message-cursor" aria-hidden="true" />
@@ -207,6 +236,7 @@ export const ChatMessageItem = memo(function ChatMessageItem({
               Continuando automaticamente… (resposta {message.continuing})
             </div>
           )}
+          {!message.streaming && message.content && <AiMessageActions content={message.content} onPrompt={onPrompt} disabled={clarifyDisabled} targetRef={contentRef} />}
         </div>
       )}
 

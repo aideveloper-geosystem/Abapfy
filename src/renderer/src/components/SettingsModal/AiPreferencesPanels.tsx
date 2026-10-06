@@ -4,6 +4,7 @@ import { useSettingsStore } from '@renderer/store/settingsStore'
 import { CLAUDE_EFFORT_LABELS_PT, CLAUDE_EFFORT_LEVELS, type ClaudeEffort } from '@renderer/lib/aiClient'
 import { WEB_SEARCH_DOMAINS } from '@renderer/lib/claudeModels'
 import type { AiPreferences } from '@renderer/lib/aiPreferences'
+import '../AiInterface.css'
 
 const EFFORT_HINTS: Record<ClaudeEffort, string> = {
   low: 'Respostas rápidas e baratas; bom para dúvidas simples.',
@@ -73,6 +74,8 @@ export function AiBehaviorPanel(): JSX.Element {
   return (
     <div className="ai-pref-panel">
       {error && <div className="mcp-error" role="alert">{error}</div>}
+
+      <section className="ai-card ai-tune-summary" aria-label="Resumo dos ajustes da IA"><header><strong><Brain size={15} /> Ajustes da resposta</strong><span>Preferências atuais</span></header><div className="ai-insights"><article><span>Profundidade</span><strong>{CLAUDE_EFFORT_LABELS_PT[prefs.defaultEffort]}</strong><p>{EFFORT_HINTS[prefs.defaultEffort]}</p></article><article><span>Raciocínio</span><strong>{prefs.showThinking ? 'Visível' : 'Recolhido'}</strong><p>{prefs.showThinking ? 'Resumo disponível para expandir quando fornecido pelo modelo.' : 'O indicador permanece; o resumo não é guardado.'}</p></article></div></section>
 
       <section className="ai-pref-group">
         <div className="ai-pref-group-header">

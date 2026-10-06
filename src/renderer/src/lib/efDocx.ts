@@ -1,5 +1,4 @@
-import PizZip from 'pizzip'
-import templateUrl from '../docs/MODELO BASE EF.docx?url'
+import { applyEfTemplateEdits, type EfTemplateEdit, type EfTemplateSnapshot } from './efTemplate'
 
 export interface EfDocxData {
   project_name: string
@@ -10,13 +9,16 @@ export interface EfDocxData {
   summary_description: string
   macro_overview: string
   functional_spec: string
+  template_revision?: string
+  template_edits?: EfTemplateEdit[]
 }
 
 export const EF_DOCX_OUTPUT_CONTRACT = `## Contrato de saída do documento EF
 
-Esta sessão está usando o Agente de EF do Abapfy. A resposta final será transformada
-automaticamente no modelo Word oficial. Quando não estiver fazendo uma pergunta de
-esclarecimento, responda APENAS com o bloco abaixo, sem introdução ou conclusão:
+Esta sessão está usando o Agente de EF do Abapfy. Quando o pedido exigir gerar ou
+revisar uma EF completa, responda APENAS com o bloco abaixo, que será transformado
+no modelo Word oficial. Para explicações e acompanhamento curto, responda em
+Markdown sem gerar novo documento. Para lacunas críticas, use o formato clarify:
 
 \`\`\`ef-docx
 {
@@ -52,7 +54,9 @@ function normalizeParsedData(parsed: unknown): EfDocxData | null {
     brief_description: field(record.brief_description, ''),
     summary_description: field(record.summary_description, ''),
     macro_overview: field(record.macro_overview, ''),
-    functional_spec: field(record.functional_spec, '')
+    functional_spec: field(record.functional_spec, ''),
+    ...(typeof record.template_revision === 'string' ? { template_revision: record.template_revision } : {}),
+    ...(Array.isArray(record.template_edits) ? { template_edits: record.template_edits as EfTemplateEdit[] } : {})
   }
 }
 
@@ -105,6 +109,27 @@ function labeledValue(raw: string, labels: string[]): string | null {
   return null
 }
 
+export function isLegacyEfDocument(raw: string): boolean {
+  // A short follow-up must not become a Word document merely because the
+  // conversation uses the EF agent. Legacy documents need an explicit title
+  // and multiple actual specification sections.
+  const lines = raw.split(/\r?\n/).map(plainTextFromMarkdown)
+  const section = (pattern: RegExp): boolean => lines.some((line) => pattern.test(line))
+  return section(/^Especificação Funcional\b/i) &&
+    section(/^(?:\d+[.)]?\s*)?Objetivo\s*:?$/i) &&
+    section(/^(?:\d+[.)]?\s*)?Escopo\s*:?$/i) &&
+    section(/^(?:\d+[.)]?\s*)?(?:Fluxo(?: do processo)?|Processo|Regras de negócio)\s*:?$/i)
+}
+
+function legacyMacroOverview(raw: string): string {
+  const lines = raw.split(/\r?\n/)
+  const start = lines.findIndex((line) => /^(?:\d+[.)]?\s*)?(?:Visão geral|Visão macro|Visão geral do processo|Macro(?: overview|fluxo)?)\s*:?$/i.test(plainTextFromMarkdown(line)))
+  if (start < 0) return 'A CONFIRMAR'
+  const remaining = lines.slice(start + 1)
+  const next = remaining.findIndex((line) => /^#{1,6}\s|^\s*\d+[.)]\s/.test(line))
+  return plainTextFromMarkdown((next < 0 ? remaining : remaining.slice(0, next)).join('\n')) || 'A CONFIRMAR'
+}
+
 /**
  * Garante o download também para respostas antigas/em Markdown do EF Consultant.
  * O fallback só deve ser habilitado pela tela quando esse agente estiver ativo,
@@ -113,6 +138,7 @@ function labeledValue(raw: string, labels: string[]): string | null {
 export function parseEfDocxResponse(raw: string, allowMarkdownFallback = false): EfDocxData | null {
   const structured = parseEfDocxData(raw)
   if (structured || !allowMarkdownFallback) return structured
+  if (!isLegacyEfDocument(raw)) return null
 
   const functionalSpec = plainTextFromMarkdown(raw)
   if (!functionalSpec) return null
@@ -131,111 +157,18 @@ export function parseEfDocxResponse(raw: string, allowMarkdownFallback = false):
     module: labeledValue(raw, ['Módulo SAP', 'Modulo SAP', 'Módulo', 'Modulo']) ?? 'A CONFIRMAR',
     brief_description: firstParagraph.slice(0, 500),
     summary_description: firstParagraph,
-    macro_overview: functionalSpec,
+    macro_overview: legacyMacroOverview(raw),
     functional_spec: functionalSpec
   }
-}
-
-function escapeXml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 function escapeRegex(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/**
- * Substitui o texto de um placeholder dentro de um <w:r>...<w:t>PLACEHOLDER</w:t></w:r>,
- * preservando o <w:rPr> original (fonte, tamanho, cor) e quebrando em múltiplos <w:t>/<w:br/>
- * dentro do mesmo run quando o valor tem múltiplas linhas — sem isso, quebras de linha do
- * texto gerado pela IA quebrariam o XML do documento.
- */
-function replacePlaceholder(xml: string, placeholder: string, value: string): string {
-  const pattern = new RegExp(
-    `<w:r([^>]*)>(<w:rPr>[\\s\\S]*?</w:rPr>)?<w:t[^>]*>${escapeRegex(placeholder)}</w:t></w:r>`,
-    'g'
-  )
-
-  return xml.replace(pattern, (_match, runAttrs: string, runProps: string | undefined) => {
-    const lines = value.split('\n')
-    const body = lines
-      .map((line, index) => {
-        const textTag = `<w:t xml:space="preserve">${escapeXml(line)}</w:t>`
-        return index === 0 ? textTag : `<w:br/>${textTag}`
-      })
-      .join('')
-    return `<w:r${runAttrs}>${runProps ?? ''}${body}</w:r>`
-  })
-}
-
-function preventJustifiedSoftBreakExpansion(settingsXml: string): string {
-  if (settingsXml.includes('<w:doNotExpandShiftReturn')) return settingsXml
-  if (settingsXml.includes('</w:compat>')) {
-    return settingsXml.replace(
-      '</w:compat>',
-      '<w:doNotExpandShiftReturn/></w:compat>'
-    )
-  }
-  return settingsXml.replace(
-    '</w:settings>',
-    '<w:compat><w:doNotExpandShiftReturn/></w:compat></w:settings>'
-  )
-}
-
-function todayFormatted(): string {
-  const now = new Date()
-  const day = String(now.getDate()).padStart(2, '0')
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  return `${day}/${month}/${now.getFullYear()}`
-}
-
-export async function generateEfDocx(data: EfDocxData): Promise<Blob> {
-  const response = await fetch(templateUrl)
-  if (!response.ok) {
-    throw new Error('Não foi possível carregar o modelo base da EF.')
-  }
-  const templateBuffer = await response.arrayBuffer()
-
-  const zip = new PizZip(templateBuffer)
-  const documentFile = zip.file('word/document.xml')
-  if (!documentFile) {
-    throw new Error('Modelo base da EF está corrompido (word/document.xml não encontrado).')
-  }
-
-  let xml = documentFile.asText()
-
-  const replacements: [string, string][] = [
-    ['INSIRA AQUI O NOME DO PROJETO', data.project_name],
-    ['NOME DO PROJETO', data.project_name],
-    ['DIGITE AQUI O NOME DO AUTOR', data.author],
-    ['BREVE DESCRIÇÃO DO PROJETO', data.brief_description],
-    ['DIGITE O MODULO DO SAP', data.module],
-    ['DIGITE A DATA DO DIA', todayFormatted()],
-    ['NOME DA EMPRESA CLIENTE', data.client_name],
-    ['NOME DO CONSULTOR', data.author],
-    ['DESCRIÇÃO RESUMIDA DO PROJETO', data.summary_description],
-    ['FALE DETALHADAMENTE UMA VISAO GERAL DO MACRO DO PROCESSO', data.macro_overview],
-    [
-      'AQUI DETALHADAMENTE MONTE A ESPECIFICAÇÃO FUNCIONAL ,DETALHES DO PROCESSO , COMO DEVE SER FEITO, QUE TABELAS E CAMPOS USAR, RESULTADO ESPERADO ',
-      data.functional_spec
-    ]
-  ]
-
-  for (const [placeholder, value] of replacements) {
-    xml = replacePlaceholder(xml, placeholder, value ?? '')
-  }
-
-  zip.file('word/document.xml', xml)
-
-  const settingsFile = zip.file('word/settings.xml')
-  if (settingsFile) {
-    zip.file('word/settings.xml', preventJustifiedSoftBreakExpansion(settingsFile.asText()))
-  }
-
-  return zip.generate({
-    type: 'blob',
-    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-  })
+export async function generateEfDocx(data: EfDocxData, clientTemplate?: EfTemplateSnapshot): Promise<Blob> {
+  if (!clientTemplate) throw new Error('O modelo EF deve ser carregado do drive: default.docx ou base.docx na raiz do módulo EFs do cliente. Gere uma nova EF para usar esse modelo.')
+  return applyEfTemplateEdits(clientTemplate, data.template_revision, data.template_edits)
 }
 
 export function efDocxFileName(data: EfDocxData): string {
@@ -244,5 +177,5 @@ export function efDocxFileName(data: EfDocxData): string {
     .replace(/[̀-ͯ]/g, '')
     .replace(/[^a-zA-Z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
-  return `EF_${slug || 'projeto'}.docx`
+  return `EF_${slug.slice(0, 120) || 'projeto'}.docx`
 }

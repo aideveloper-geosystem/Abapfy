@@ -1,3 +1,4 @@
+import type { SapControlSettings, SapControlAction } from '../shared/sapControl'
 import { ElectronAPI } from '@electron-toolkit/preload'
 
 export interface WindowControlsApi {
@@ -143,21 +144,8 @@ export interface McpApi {
   onConfirmationResolved: (callback: (event: McpConfirmationResolved) => void) => () => void
 }
 
-export interface SapGuiSettings {
-  version: 1
-  enabled: boolean
-  sessionId: string | null
-  sessionIdentity: string | null
-  controlMode: 'off' | 'ask' | 'always'
-}
-
-export interface SapGuiControlAction {
-  kind: 'click' | 'type_text' | 'press_key'
-  x?: number
-  y?: number
-  text?: string
-  key?: 'TAB' | 'ENTER' | 'ESC' | 'BACKSPACE' | 'LEFT' | 'RIGHT' | 'UP' | 'DOWN'
-}
+export type SapGuiSettings = SapControlSettings
+export type SapGuiControlAction = SapControlAction
 
 export interface SapGuiSession {
   id: string
@@ -173,6 +161,8 @@ export interface SapGuiScan {
 }
 
 export interface SapGuiCapture {
+  captureId: string
+  changeRatio: number | null
   window: SapGuiSession
   imageDataUrl: string
   width: number
@@ -184,8 +174,8 @@ export interface SapGuiApi {
   saveSettings: (userId: string, value: SapGuiSettings) => Promise<SapGuiSettings>
   listSessions: () => Promise<SapGuiScan>
   snapshot: (userId: string) => Promise<SapGuiCapture>
-  controlStatus: () => Promise<{ version: 2 }>
-  control: (userId: string, action: SapGuiControlAction, callId: string) => Promise<string>
+  controlStatus: () => Promise<{ version: 4 }>
+  control: (userId: string, action: SapGuiControlAction, callId: string, captureId: string) => Promise<string>
   cancelControl: (callId: string) => void
 }
 
@@ -194,7 +184,7 @@ export interface Api {
   updates: UpdatesApi
   mcp: McpApi
   sapGui: SapGuiApi
-  documents: { renderPdf: (html: string) => Promise<string> }
+  documents: { renderPdf: (html: string) => Promise<string>; openDocx: (bytes: Uint8Array, fileName: string) => Promise<void> }
 }
 
 declare global {

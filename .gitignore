@@ -5,6 +5,8 @@ dist-electron
 release
 .env
 .env.local
+.env.supabase-migration.local
+.supabase-migration/
 *.log
 .DS_Store
 .vscode/*

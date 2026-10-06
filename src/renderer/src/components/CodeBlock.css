@@ -44,3 +44,12 @@
 .code-block pre {
   overflow-x: auto;
 }
+
+/* Prism's dark palette is replaced by theme tokens in every Horizon variant. */
+.code-block code, .code-block .token { color: var(--color-ink) !important; }
+.code-block .token.comment { color: var(--color-ink-muted) !important; }
+.code-block .token.keyword, .code-block .token.function { color: var(--color-primary) !important; }
+.code-block .token.string, .code-block .token.number { color: var(--color-semantic-success) !important; }
+.code-block .code-line-added { background: color-mix(in srgb, var(--color-semantic-success) 10%, var(--color-surface-1)); }
+.code-block .code-line-removed { background: color-mix(in srgb, var(--color-semantic-danger) 10%, var(--color-surface-1)); }
+.code-block-copy:focus-visible { outline: 2px solid var(--color-primary-focus); outline-offset: 2px; }

@@ -5,7 +5,12 @@ const LABELS: Record<string, string> = {
   objective: 'Objetivo', structure: 'Estrutura técnica', tables: 'Tabelas e estruturas',
   parameters: 'Parâmetros e interface', processing_logic: 'Fluxo de processamento',
   error_handling: 'Tratamento de erros e exceções', dependencies: 'Dependências',
-  performance_notes: 'Performance e riscos', change_log_template: 'Histórico de alterações'
+  performance_notes: 'Performance e riscos', change_log_template: 'Histórico de alterações',
+  analyzed_objects: 'Objetos analisados', coverage: 'Cobertura da análise', limitations: 'Limitações e lacunas',
+  security_notes: 'Segurança e autorizações', validation: 'Verificações recomendadas',
+  name: 'Nome', direction: 'Direção', type: 'Tipo', required: 'Obrigatório', description: 'Descrição',
+  source: 'Origem / evidência', usage: 'Uso', step: 'Etapa', routine: 'Rotina', condition: 'Condição',
+  action: 'Ação', inputs: 'Entradas', outputs: 'Saídas'
 }
 
 function escapeHtml(value: string): string {
@@ -27,7 +32,16 @@ function renderValue(value: StructuredValue): string {
   if (typeof value === 'object') {
     return Object.entries(value).map(([key, entry]) => `<div class="field"><strong>${escapeHtml(label(key))}</strong>${renderValue(entry)}</div>`).join('')
   }
-  return `<p>${escapeHtml(String(value)).replace(/\r?\n/g, '<br>')}</p>`
+  const displayed = value === true ? 'Sim' : value === false ? 'Não' : value === 'partial' ? 'Parcial' : value === 'complete' ? 'Completa' : String(value)
+  return `<p>${escapeHtml(displayed).replace(/\r?\n/g, '<br>')}</p>`
+}
+
+function renderSection(key: string, value: StructuredValue): string {
+  if (!['parameters', 'tables', 'dependencies'].includes(key) || !Array.isArray(value) || value.length === 0 ||
+    !value.every((item) => item !== null && typeof item === 'object' && !Array.isArray(item))) return renderValue(value)
+  const rows = value as Record<string, StructuredValue>[]
+  const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))]
+  return `<table><thead><tr>${columns.map((column) => `<th>${escapeHtml(label(column))}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr>${columns.map((column) => `<td>${renderValue(row[column] ?? null)}</td>`).join('')}</tr>`).join('')}</tbody></table>`
 }
 
 export function dtecPdfFileName(data: Record<string, StructuredValue>): string {
@@ -37,13 +51,13 @@ export function dtecPdfFileName(data: Record<string, StructuredValue>): string {
 
 export function buildDtecPdfHtml(data: Record<string, StructuredValue>): string {
   const title = escapeHtml(String(data.object_name || 'Objeto não identificado'))
-  const preferred = Object.keys(LABELS)
+  const preferred = ['object_name', 'object_type', 'sap_module', 'analyzed_objects', 'coverage', 'limitations', 'objective', 'structure', 'tables', 'parameters', 'processing_logic', 'error_handling', 'dependencies', 'performance_notes', 'security_notes', 'validation', 'change_log_template']
   const entries = [
     ...preferred.filter((key) => key in data).map((key) => [key, data[key]] as const),
     ...Object.entries(data).filter(([key]) => !preferred.includes(key))
   ]
   const sections = entries.filter(([key]) => !['object_name', 'object_type', 'sap_module'].includes(key))
-    .map(([key, value], index) => `<section><h2><span>${String(index + 1).padStart(2, '0')}</span>${escapeHtml(label(key))}</h2>${renderValue(value)}</section>`).join('')
+    .map(([key, value], index) => `<section><h2><span>${String(index + 1).padStart(2, '0')}</span>${escapeHtml(label(key))}</h2>${renderSection(key, value)}</section>`).join('')
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>DTec ${title}</title><style>
     @page { size: A4; margin: 20mm 18mm 19mm; }
     * { box-sizing: border-box; }
@@ -63,5 +77,11 @@ export function buildDtecPdfHtml(data: Record<string, StructuredValue>): string 
     .field { margin: 0 0 8px; break-inside: avoid; }
     .field strong { display: block; color: #557183; font-size: 8pt; text-transform: uppercase; letter-spacing: .5px; }
     .field p { margin: 2px 0 6px; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9pt; }
+    thead { display: table-header-group; }
+    th, td { border: 1px solid #cbdbe5; padding: 7px; vertical-align: top; overflow-wrap: anywhere; }
+    th { text-align: left; color: #173750; background: #eaf3f8; }
+    td p { margin: 0; }
+    tr { break-inside: avoid; }
   </style></head><body><header><div class="eyebrow">Abapfy · Documentação técnica</div><h1>${title}</h1><p class="subtitle">Fluxo e arquitetura do objeto ABAP analisado</p><div class="meta"><span>Tipo: ${escapeHtml(String(data.object_type || 'A confirmar'))}</span><span>Módulo: ${escapeHtml(String(data.sap_module || 'A confirmar'))}</span></div></header>${sections}</body></html>`
 }

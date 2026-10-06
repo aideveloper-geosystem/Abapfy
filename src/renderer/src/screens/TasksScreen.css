@@ -784,3 +784,18 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+.tasks-filter-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 4px 0 12px; }
+.tasks-filter-bar > label { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--color-hairline); border-radius: var(--radius-md); background: var(--color-surface-1); color: var(--color-ink-muted); }
+.tasks-filter-bar input { width: 270px; max-width: 100%; border: 0; outline: none; background: transparent; color: var(--color-ink); font: 12px var(--font-text); }
+.tasks-filter-bar > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.tasks-filter-bar button { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--color-hairline); border-radius: var(--radius-pill); color: var(--color-ink-muted); background: var(--color-surface-1); font: 12px var(--font-text); }
+.tasks-filter-bar button[aria-pressed=true] { background: var(--color-surface-3); color: var(--color-primary); border-color: var(--color-primary); }
+.tasks-filter-bar button span { font-variant-numeric: tabular-nums; }
+.tasks-result-count { color: var(--color-ink-muted); font: 11px var(--font-text); margin-bottom: 12px; }
+.tasks-records { overflow: auto; border: 1px solid var(--color-hairline); border-radius: var(--radius-lg); background: var(--color-surface-1); }
+.tasks-records table { width: 100%; border-collapse: collapse; text-align: left; font: 12px var(--font-text); color: var(--color-ink); }
+.tasks-records th, .tasks-records td { padding: 12px 14px; border-bottom: 1px solid var(--color-hairline); min-width: 120px; }
+.tasks-records th { position: sticky; top: 0; background: var(--color-surface-2); }
+.tasks-records td button { text-align: left; color: var(--color-primary); font: inherit; }
+.tasks-records p { padding: 18px; color: var(--color-ink-muted); }
+.tasks-filter-bar button:focus-visible, .tasks-records button:focus-visible, .tasks-filter-bar label:focus-within { outline: 2px solid var(--color-primary-focus); outline-offset: 2px; }

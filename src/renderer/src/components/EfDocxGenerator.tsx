@@ -2,14 +2,21 @@ import { useEffect, useState } from 'react'
 import { AlertCircle, CheckCircle2, Download, FileText } from 'lucide-react'
 import { efDocxFileName, generateEfDocx, type EfDocxData } from '@renderer/lib/efDocx'
 import './EfDocxGenerator.css'
+import { SharedEfDocument } from './SharedEfDocument'
+import type { EfDocumentJob } from '@renderer/lib/efDrive'
 
 interface EfDocxGeneratorProps {
   data: EfDocxData
+  job?: EfDocumentJob
 }
 
 type Status = 'generating' | 'ready' | 'error'
 
-export function EfDocxGenerator({ data }: EfDocxGeneratorProps): JSX.Element {
+export function EfDocxGenerator({ data, job }: EfDocxGeneratorProps): JSX.Element {
+  return job ? <SharedEfDocument data={data} job={job} /> : <LegacyEfDocxGenerator data={data} />
+}
+
+function LegacyEfDocxGenerator({ data }: EfDocxGeneratorProps): JSX.Element {
   const [status, setStatus] = useState<Status>('generating')
   const [error, setError] = useState('')
   const [fileUrl, setFileUrl] = useState<string | null>(null)
