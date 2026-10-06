@@ -51,7 +51,7 @@ function mainFixture(t) {
         inputs.push(request); return 'Entrada enviada.'
       }
     } }
-  })
+  }, { process: { ...process, platform: 'win32' } })
   const save = (value, confirm = async () => true) => module.saveSapWindowSettingsWithApproval(userId, value, confirm)
   const control = async (a, confirm = async () => true, cap) => module.performSapControl(userId, a, confirm, undefined, (cap ?? await module.captureSapWindow(userId)).captureId)
   return { module, inputs, save, control, base, setWindow: value => { scanWindow = value } }
