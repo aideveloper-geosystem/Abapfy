@@ -23,6 +23,7 @@ interface ClientsState {
   error: string | null
   load: () => Promise<void>
   createClient: (name: string, description: string) => Promise<void>
+  deleteClient: (clientId: string) => Promise<void>
   updateClient: (
     client: Client,
     name: string,
@@ -73,7 +74,7 @@ export const useClientsStore = create<ClientsState>((set, get) => ({
   },
   createClient: async (name, description) => {
     const userId = useAuthStore.getState().user?.id
-    if (!userId) return
+    if (!userId) throw new Error('Sua sessão expirou. Entre novamente para criar o cliente.')
     const { error } = await supabase.from('clients').insert({
       name: name.trim(),
       description: description.trim() || null,
@@ -82,6 +83,36 @@ export const useClientsStore = create<ClientsState>((set, get) => ({
     })
     if (error) throw error
     await get().load()
+  },
+  deleteClient: async (clientId) => {
+    const { user, role } = useAuthStore.getState()
+    if (!user || (role !== 'MASTER' && role !== 'ADMIN')) {
+      throw new Error('Somente MASTER ou ADMIN podem excluir clientes.')
+    }
+    const contents = await Promise.all(
+      ['client_files', 'chats', 'projects'].map((table) =>
+        supabase.from(table).select('id', { count: 'exact', head: true }).eq('client_id', clientId)
+      )
+    )
+    for (const result of contents) {
+      if (result.error) throw result.error
+      if (result.count === null) throw new Error('Não foi possível verificar o conteúdo do cliente.')
+      if (result.count > 0) {
+        throw new Error('Este cliente possui arquivos, chats ou projetos. Remova ou transfira esse conteúdo antes de excluir o cliente, incluindo os arquivos na lixeira.')
+      }
+    }
+    const { data, error } = await supabase.from('clients').delete().eq('id', clientId).select('id').single()
+    if (error) {
+      if (error.code === '23503' || error.code === 'P0001') {
+        throw new Error('O cliente possui conteúdo vinculado e não pode ser excluído.')
+      }
+      throw error
+    }
+    if (!data) throw new Error('Cliente não encontrado ou exclusão não autorizada.')
+    set((state) => ({
+      clients: state.clients.filter((client) => client.id !== clientId),
+      modules: state.modules.filter((module) => module.clientId !== clientId)
+    }))
   },
   updateClient: async (client, name, description, workbookMd) => {
     const userId = useAuthStore.getState().user?.id

@@ -6,6 +6,16 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-06
+
+### Clientes
+
+- Modais de clientes, módulos e pastas renderizados em uma camada própria, com interação de texto habilitada e proteção contra arraste da janela.
+- Erros de salvamento exibidos dentro do modal e bloqueio de envios duplicados durante a operação.
+- Exclusão de clientes disponível para MASTER e ADMIN, com confirmação e verificação de conteúdo vinculado. Clientes com arquivos, inclusive na lixeira, chats ou projetos não podem ser excluídos antes da remoção ou transferência desse conteúdo.
+- Criação de clientes informa quando a sessão expirou, evitando fechamento do formulário sem salvar.
+- Testes de regressão para criação, permissões e exclusão segura de clientes.
+
 ## [1.0.1] - 2026-10-06
 
 ### Interface de IA

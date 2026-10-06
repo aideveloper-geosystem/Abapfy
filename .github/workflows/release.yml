@@ -47,7 +47,7 @@ jobs:
         run: pnpm typecheck
 
       - name: Test application behavior
-        run: node --test tests/ai-presentation.test.mjs tests/agent-refinements.test.mjs tests/customizing-response.test.mjs tests/ef-drive.test.mjs tests/sap-control.test.mjs
+        run: node --test tests/ai-presentation.test.mjs tests/agent-refinements.test.mjs tests/clients-store.test.mjs tests/customizing-response.test.mjs tests/ef-drive.test.mjs tests/sap-control.test.mjs
 
       - name: Build renderer/main
         run: pnpm build

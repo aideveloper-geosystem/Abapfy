@@ -1,5 +1,6 @@
 import { isEfModule } from '@renderer/lib/efDrive'
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { BookOpen, ChevronRight, FileText, Folder, FolderInput, FolderPlus, MessageSquarePlus, Plus, Trash2, Upload } from 'lucide-react'
 import { supabase } from '@renderer/lib/supabaseClient'
 import { extractTextFromFile } from '@renderer/lib/attachments'
@@ -29,7 +30,7 @@ interface Props {
 }
 
 export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceError, onActivityChange }: Props): JSX.Element {
-  const { clients, modules, error, load, createClient, updateClient, createModule, updateModule } =
+  const { clients, modules, error, load, createClient, deleteClient, updateClient, createModule, updateModule } =
     useClientsStore()
   const { projects, recentChats, projectChats, loadProjectChats } = useChatStore()
   const { role, user } = useAuthStore()
@@ -49,6 +50,9 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
   const [workbook, setWorkbook] = useState('')
   const [openedFile, setOpenedFile] = useState<ClientFileRecord | null>(null)
   const [knowledgeProject, setKnowledgeProject] = useState<ProjectSummary | null>(null)
+  const [deletingClient, setDeletingClient] = useState<Client | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [dialogError, setDialogError] = useState<string | null>(null)
   const [editor, setEditor] = useState<{
     mode: 'client-new' | 'client-edit' | 'module-new' | 'module-edit'
     name: string
@@ -154,7 +158,9 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
     }
   }
   async function saveEditor(): Promise<void> {
-    if (!editor?.name.trim()) return
+    if (busy || !editor?.name.trim()) return
+    setBusy(true)
+    setDialogError(null)
     try {
       if (editor.mode === 'client-new') await createClient(editor.name, editor.description)
       if (editor.mode === 'client-edit' && client)
@@ -166,7 +172,27 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
       setEditor(null)
       setMessage(null)
     } catch (cause) {
-      setMessage((cause as Error).message)
+      setDialogError((cause as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function confirmDeleteClient(): Promise<void> {
+    if (!deletingClient || busy) return
+    setBusy(true)
+    setDialogError(null)
+    try {
+      await deleteClient(deletingClient.id)
+      setClientId(null)
+      setModuleId(null)
+      setShowTrash(false)
+      setEditingWorkbook(false)
+      setDeletingClient(null)
+      setMessage(null)
+    } catch (cause) {
+      setDialogError((cause as Error).message)
+    } finally {
+      setBusy(false)
     }
   }
   async function importWorkbook(event: ChangeEvent<HTMLInputElement>): Promise<void> {
@@ -278,13 +304,18 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
           <p>Conteúdo compartilhado por cliente e módulo</p>
         </div>
         {canManage && !client && (
-          <button onClick={() => setEditor({ mode: 'client-new', name: '', description: '' })}>
+          <button onClick={() => { setDialogError(null); setEditor({ mode: 'client-new', name: '', description: '' }) }}>
             <Plus size={15} /> Novo cliente
           </button>
         )}
         {client && (
           <button className={showTrash ? 'clients-trash-toggle selected' : 'clients-trash-toggle'} onClick={() => setShowTrash((current) => !current)}>
             <Trash2 size={15} /> {showTrash ? 'Voltar ao drive' : 'Lixeira'}
+          </button>
+        )}
+        {canManage && client && (
+          <button className="clients-delete" onClick={() => { setDialogError(null); setDeletingClient(client) }}>
+            <Trash2 size={15} /> Excluir cliente
           </button>
         )}
       </header>
@@ -552,7 +583,7 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
         </section>
       </div>
       {openedFile && <ClientFilePreview file={openedFile} onClose={() => setOpenedFile(null)} />}
-      {folderName !== null && (
+      {folderName !== null && createPortal(
         <div className="clients-file-overlay" onMouseDown={() => setFolderName(null)}>
           <form className="clients-editor" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); void createFolder() }}>
             <h2>Nova pasta</h2>
@@ -560,9 +591,9 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
             <label>Nome<input autoFocus required maxLength={120} value={folderName} onChange={(event) => setFolderName(event.target.value)} /></label>
             <div><button type="button" onClick={() => setFolderName(null)}>Cancelar</button><button type="submit">Criar pasta</button></div>
           </form>
-        </div>
+        </div>, document.body
       )}
-      {movingFile && (
+      {movingFile && createPortal(
         <div className="clients-file-overlay" onMouseDown={() => setMovingFile(null)}>
           <form className="clients-editor" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); void moveFile() }}>
             <h2>Mover {movingFile.name}</h2>
@@ -573,12 +604,15 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
             </select></label>
             <div><button type="button" onClick={() => setMovingFile(null)}>Cancelar</button><button type="submit">Mover</button></div>
           </form>
-        </div>
+        </div>, document.body
       )}
-      {editor && (
-        <div className="clients-file-overlay" onMouseDown={() => setEditor(null)}>
+      {editor && createPortal(
+        <div className="clients-file-overlay" onMouseDown={() => { if (!busy) { setEditor(null); setDialogError(null) } }}>
           <form
             className="clients-editor"
+            role="dialog"
+            aria-modal="true"
+            aria-label={editor.mode.includes('client') ? 'Cliente' : 'Módulo'}
             onMouseDown={(event) => event.stopPropagation()}
             onSubmit={(event) => {
               event.preventDefault()
@@ -586,11 +620,13 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
             }}
           >
             <h2>{editor.mode.includes('client') ? 'Cliente' : 'Módulo'}</h2>
+            {dialogError && <p className="clients-error" role="alert">{dialogError}</p>}
             <label>
               Nome
               <input
                 autoFocus
                 required
+                disabled={busy}
                 value={editor.name}
                 onChange={(event) => setEditor({ ...editor, name: event.target.value })}
               />
@@ -598,18 +634,32 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
             <label>
               Descrição
               <textarea
+                disabled={busy}
                 value={editor.description}
                 onChange={(event) => setEditor({ ...editor, description: event.target.value })}
               />
             </label>
             <div>
-              <button type="button" onClick={() => setEditor(null)}>
+              <button type="button" disabled={busy} onClick={() => { setEditor(null); setDialogError(null) }}>
                 Cancelar
               </button>
-              <button type="submit">Salvar</button>
+              <button type="submit" disabled={busy || !editor.name.trim()}>{busy ? 'Salvando…' : 'Salvar'}</button>
             </div>
           </form>
-        </div>
+        </div>, document.body
+      )}
+      {deletingClient && createPortal(
+        <div className="clients-file-overlay" onMouseDown={() => { if (!busy) { setDeletingClient(null); setDialogError(null) } }}>
+          <form className="clients-editor" role="dialog" aria-modal="true" aria-label="Excluir cliente" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); void confirmDeleteClient() }}>
+            <h2>Excluir {deletingClient.name}?</h2>
+            <p>Esta ação é permanente e remove o cliente e seus módulos vazios. Clientes com arquivos, chats ou projetos precisam ter esse conteúdo removido ou transferido primeiro.</p>
+            {dialogError && <p className="clients-error" role="alert">{dialogError}</p>}
+            <div>
+              <button autoFocus type="button" disabled={busy} onClick={() => { setDeletingClient(null); setDialogError(null) }}>Cancelar</button>
+              <button className="clients-delete" type="submit" disabled={busy}>{busy ? 'Excluindo…' : 'Excluir cliente'}</button>
+            </div>
+          </form>
+        </div>, document.body
       )}
       <ProjectKnowledgeModal project={knowledgeProject} onClose={() => setKnowledgeProject(null)} />
     </main>
