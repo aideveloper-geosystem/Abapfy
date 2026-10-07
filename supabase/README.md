@@ -120,3 +120,25 @@ user_id`) nas duas tabelas acima.
 ## Variáveis de ambiente
 
 Preencha `.env` (a partir de `.env.example`) com a URL e a `anon key` do projeto Supabase.
+
+## Router Claude Haiku 5.5
+
+Aplique [035_claude_haiku_5_5_router.sql](sql/035_claude_haiku_5_5_router.sql) após 034
+antes de testar esta versão. O router depende de `claude-haiku-5-5` habilitado no
+catálogo e permitido para o usuário. A migração preserva o modelo anterior,
+herda sua habilitação inicial e copia seus bloqueios por usuário; reaplicar não
+reativa um Haiku 5.5 desabilitado pelo administrador. A build não executa o SQL.
+
+As duas rotas (agente + skills e somente skills) usam esforço `low`, thinking
+adaptativo e até 2.048 tokens incluindo thinking. A leitura seleciona os blocos
+`text`; recusas, truncamento, JSON inválido e falhas de rede usam o fallback
+sem seleção automática. Skills retornadas são válidas, únicas e limitadas a cinco.
+
+Para validar no app, inicie um novo chat sem agente fixo e confira o agente e as
+skills escolhidos. Depois fixe um agente e confirme que só as skills são
+classificadas. Verifique também que o bloqueio do novo modelo impede o router.
+Os testes locais usam respostas simuladas; latência, qualidade e acesso real à
+API devem ser validados com sua conta.
+
+Referências: [lançamento](https://www.anthropic.com/claude-haiku-5-5),
+[migração oficial](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide).

@@ -10,6 +10,7 @@
  *   `fallbacks: "default"`, que reencaminha recusas de safeguard para outro
  *   modelo na mesma chamada em vez de encerrar a resposta.
  * - Opus 4.6+ / Sonnet 4.6+ / Opus 5 / Sonnet 5: thinking adaptativo + effort.
+ * - Haiku 5.5: thinking adaptativo + effort, sem fallback server-side.
  * - Haiku 4.5 e anteriores: sem adaptive thinking nem effort (retornam 400).
  */
 
@@ -19,12 +20,14 @@ const FALLBACK_BETA = 'server-side-fallback-2026-07-01'
 
 const GEN_5_5 = /^claude-(opus|sonnet)-5-5/
 // Haiku, Claude 3.x e Opus/Sonnet 4.0–4.5 (inclui IDs datados como claude-sonnet-4-20250514).
+const HAIKU_5_5 = /^claude-haiku-5-5$/
 const LEGACY = /^claude-(haiku-|3|(opus|sonnet)-4-[0-5])/
 
-export type ClaudeGeneration = 'gen-5-5' | 'adaptive' | 'legacy'
+export type ClaudeGeneration = 'gen-5-5' | 'haiku-5-5' | 'adaptive' | 'legacy'
 
 export function claudeGeneration(model: string): ClaudeGeneration {
   if (GEN_5_5.test(model)) return 'gen-5-5'
+  if (HAIKU_5_5.test(model)) return 'haiku-5-5'
   if (LEGACY.test(model)) return 'legacy'
   return 'adaptive'
 }
@@ -84,7 +87,10 @@ export function claudeModelParams(model: string, options: ClaudeBodyOptions): Re
  * deve voltar inteiro no histórico — blocos thinking ficam vinculados à conversa.
  */
 export function claudeToolLoopParams(model: string, maxTokens: number, effort = 'medium'): Record<string, unknown> {
-  if (claudeGeneration(model) !== 'gen-5-5') return { model, max_tokens: maxTokens, ...PROMPT_CACHE }
+  const generation = claudeGeneration(model)
+  if (generation !== 'gen-5-5' && generation !== 'haiku-5-5') {
+    return { model, max_tokens: maxTokens, ...PROMPT_CACHE }
+  }
   return claudeModelParams(model, { effort, maxTokens, thinkingMaxTokens: Math.max(maxTokens, 16000) })
 }
 

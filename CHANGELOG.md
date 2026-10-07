@@ -6,6 +6,20 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-10-07
+
+### Router de IA
+
+- Roteamento de agentes e skills atualizado para Claude Haiku 5.5, com esforço baixo e thinking adaptativo.
+- Orçamento de 2.048 tokens incluindo thinking e leitura da resposta por blocos de texto.
+- Recusas, truncamento, JSON inválido e falhas de rede mantêm o fluxo sem seleção automática; skills válidas são únicas e limitadas a cinco.
+- Reconhecimento do Haiku 5.5 nos parâmetros Claude sem ativar fallback server-side incompatível.
+- Testes de regressão do router incluídos na validação da release.
+
+### Configuração necessária
+
+- Aplicar a migração Supabase 035 após 034 antes de usar o novo router. Ela cadastra o Haiku 5.5 e preserva a habilitação e os bloqueios por usuário do router anterior. O aplicativo não executa migrações automaticamente.
+
 ## [1.0.2] - 2026-10-06
 
 ### Clientes

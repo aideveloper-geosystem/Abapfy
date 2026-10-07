@@ -32,7 +32,64 @@ export const CLAUDE_EFFORT_LABELS_PT: Record<ClaudeEffort, string> = {
   max: 'Máximo'
 }
 
-export const ROUTER_MODEL = 'claude-haiku-4-5-20251001'
+export const ROUTER_MODEL = 'claude-haiku-5-5'
+
+// Classificação curta: esforço baixo reduz latência; o orçamento inclui thinking.
+const ROUTER_MAX_TOKENS = 2048
+
+async function requestRouter(
+  claudeApiKey: string,
+  system: string,
+  content: string
+): Promise<Record<string, unknown> | null> {
+  try {
+    const response = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: claudeHeaders(claudeApiKey, ROUTER_MODEL),
+      body: JSON.stringify({
+        ...claudeModelParams(ROUTER_MODEL, {
+          effort: 'low',
+          maxTokens: ROUTER_MAX_TOKENS,
+          thinkingMaxTokens: ROUTER_MAX_TOKENS
+        }),
+        system,
+        messages: [{ role: 'user', content }]
+      })
+    })
+    if (!response.ok) return null
+
+    const data = await response.json()
+    // Recusas e respostas truncadas não podem ativar agentes ou skills.
+    if (data.stop_reason !== 'end_turn' || !Array.isArray(data.content)) return null
+    const raw = data.content
+      .filter(
+        (block: { type?: string; text?: unknown } | null) =>
+          block?.type === 'text' && typeof block.text === 'string'
+      )
+      .map((block: { text: string }) => block.text)
+      .join('')
+      .trim()
+    if (!raw) return null
+    const jsonMatch = raw.match(/\{[\s\S]*\}/)
+    const parsed: unknown = JSON.parse(jsonMatch ? jsonMatch[0] : raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null
+  } catch {
+    return null
+  }
+}
+
+function routedSkillIds(value: unknown, skills: SkillCatalogEntry[]): string[] {
+  if (!Array.isArray(value)) return []
+  return [
+    ...new Set(
+      value.filter(
+        (id): id is string => typeof id === 'string' && skills.some((skill) => skill.id === id)
+      )
+    )
+  ].slice(0, 5)
+}
 
 export type FinishReason = 'stop' | 'length' | 'other'
 
@@ -472,51 +529,17 @@ export async function routeConversation(
     .map((skill) => `- ${skill.id}: ${skill.name} — ${skill.description}`)
     .join('\n')
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': claudeApiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: ROUTER_MODEL,
-      max_tokens: 300,
-      system:
-        'Você é o roteador de um harness de agentes SAP/ABAP. Dada a mensagem do usuário, responda APENAS com um JSON válido, sem nenhum texto fora dele, no formato exato: {"agent_id": "id exato do agente mais adequado do catálogo de agentes, ou null se nenhum servir bem", "skill_ids": ["ids do catálogo de skills diretamente relevantes ao pedido, no máximo 5, pode ser array vazio"]}. Nunca invente ids fora dos catálogos fornecidos.',
-      messages: [
-        {
-          role: 'user',
-          content: `Catálogo de agentes:\n${agentCatalog}\n\nCatálogo de skills habilitadas:\n${skillCatalog || '(nenhuma)'}\n\nMensagem do usuário:\n${userMessage}`
-        }
-      ]
-    })
-  })
-
-  if (!response.ok) return { agentId: null, skillIds: [] }
-
-  try {
-    const data = await response.json()
-    const raw: string = data.content?.[0]?.text?.trim() ?? '{}'
-    const jsonMatch = raw.match(/\{[\s\S]*\}/)
-    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw)
-
-    const agentId =
-      typeof parsed.agent_id === 'string' && agents.some((agent) => agent.id === parsed.agent_id)
-        ? parsed.agent_id
-        : null
-
-    const skillIds: string[] = Array.isArray(parsed.skill_ids)
-      ? parsed.skill_ids.filter(
-          (id: unknown) => typeof id === 'string' && skills.some((skill) => skill.id === id)
-        )
-      : []
-
-    return { agentId, skillIds }
-  } catch {
-    return { agentId: null, skillIds: [] }
-  }
+  const parsed = await requestRouter(
+    claudeApiKey,
+    'Você é o roteador de um harness de agentes SAP/ABAP. Dada a mensagem do usuário, responda APENAS com um JSON válido, sem nenhum texto fora dele, no formato exato: {"agent_id": "id exato do agente mais adequado do catálogo de agentes, ou null se nenhum servir bem", "skill_ids": ["ids do catálogo de skills diretamente relevantes ao pedido, no máximo 5, pode ser array vazio"]}. Nunca invente ids fora dos catálogos fornecidos.',
+    `Catálogo de agentes:\n${agentCatalog}\n\nCatálogo de skills habilitadas:\n${skillCatalog || '(nenhuma)'}\n\nMensagem do usuário:\n${userMessage}`
+  )
+  if (!parsed) return { agentId: null, skillIds: [] }
+  const agentId =
+    typeof parsed.agent_id === 'string' && agents.some((agent) => agent.id === parsed.agent_id)
+      ? parsed.agent_id
+      : null
+  return { agentId, skillIds: routedSkillIds(parsed.skill_ids, skills) }
 }
 
 /** Classifica somente skills quando o usuário já fixou o agente no composer. */
@@ -530,40 +553,10 @@ export async function routeSkills(
   const skillCatalog = skills
     .map((skill) => `- ${skill.id}: ${skill.name} — ${skill.description}`)
     .join('\n')
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': claudeApiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: ROUTER_MODEL,
-      max_tokens: 220,
-      system:
-        'Você classifica skills para uma sessão cujo agente já foi escolhido pelo usuário. Responda APENAS com JSON válido no formato exato: {"skill_ids":["ids diretamente relevantes, no máximo 5"]}. Nunca escolha, sugira ou altere o agente. Nunca invente ids.',
-      messages: [
-        {
-          role: 'user',
-          content: `Catálogo de skills habilitadas:\n${skillCatalog}\n\nMensagem do usuário:\n${userMessage}`
-        }
-      ]
-    })
-  })
-
-  if (!response.ok) return []
-  try {
-    const data = await response.json()
-    const raw: string = data.content?.[0]?.text?.trim() ?? '{}'
-    const jsonMatch = raw.match(/\{[\s\S]*\}/)
-    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw)
-    return Array.isArray(parsed.skill_ids)
-      ? parsed.skill_ids.filter(
-          (id: unknown) => typeof id === 'string' && skills.some((skill) => skill.id === id)
-        )
-      : []
-  } catch {
-    return []
-  }
+  const parsed = await requestRouter(
+    claudeApiKey,
+    'Você classifica skills para uma sessão cujo agente já foi escolhido pelo usuário. Responda APENAS com JSON válido no formato exato: {"skill_ids":["ids diretamente relevantes, no máximo 5"]}. Nunca escolha, sugira ou altere o agente. Nunca invente ids.',
+    `Catálogo de skills habilitadas:\n${skillCatalog}\n\nMensagem do usuário:\n${userMessage}`
+  )
+  return routedSkillIds(parsed?.skill_ids, skills)
 }
