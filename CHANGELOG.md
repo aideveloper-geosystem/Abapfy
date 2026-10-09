@@ -6,6 +6,30 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-10-09
+
+### Catálogo SAP e embeddings
+
+- Busca híbrida de BAdIs e BAPIs no Enhancement Finder, com candidatos, evidências e atividade da ferramenta visíveis no chat.
+- Catálogo Windows com 11.685 objetos, índice pronto, EmbeddingGemma 2 e runtime CPU incluídos na atualização: usuários não precisam configurar nem indexar.
+- Administração de embeddings disponível para MASTER/ADMIN, com importação, indexação CPU/Vulkan e preparação do pacote da atualização.
+- Integridade do pacote verificada por checksum e validação dos arquivos, modelo, dimensões, DLLs e licenças. Vetores consultados localmente, sem consultas ao Supabase.
+- Recomendações de enhancements com apresentação estruturada e distinção entre evidência do catálogo e adequação técnica.
+
+### Contexto e chat
+
+- Compactação automática de contexto pelo router, comando `/compact`, animação no fluxo e configurações personalizáveis em Features.
+- Histórico original preservado; falhas e cancelamentos não substituem o contexto por um resumo incompleto.
+- Input mais compacto e indicador circular de uso do contexto.
+- Ctrl+V de capturas com prévia removível e envio multimodal a Claude, OpenAI e Gemini. Até três imagens por mensagem; PNG, JPEG e WebP também disponíveis no seletor de arquivos.
+- Ditado no Windows pelo botão de microfone ou Win + H. Whisper e configuração de áudio local removidos.
+
+### Limites desta versão
+
+- Catálogo de embeddings e ditado nativo distribuídos no Windows; o painel Win + H utiliza o serviço de ditado do Windows.
+- Capturas anexadas ficam em memória durante a sessão; os bytes não são persistidos no Supabase e precisam ser reenviados após reiniciar o aplicativo.
+- O catálogo acrescenta aproximadamente 321 MiB à atualização Windows. Mudanças da base entram em uma nova release.
+
 ## [1.0.3] - 2026-10-07
 
 ### Router de IA

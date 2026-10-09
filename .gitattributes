@@ -1,2 +1,5 @@
 *.pdf binary
 *.docx binary
+
+# Preserve upstream Markdown hard line breaks in the bundled model cards.
+resources/local-search-licenses/*.md whitespace=-blank-at-eol

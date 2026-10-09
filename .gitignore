@@ -1,4 +1,10 @@
 node_modules
+.local-ai/
+resources/local-search/
+resources/local-search.previous*/
+resources/.catalog-stage-*/
+resources/catalog-local-search.zip
+tmp/local-ai-tests/
 out
 dist
 dist-electron

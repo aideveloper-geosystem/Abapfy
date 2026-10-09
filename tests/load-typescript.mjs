@@ -13,7 +13,12 @@ export function loadTs(file, mocks = {}, globals = {}) {
   const module = { exports: {} }
   const localRequire = (name) => {
     if (Object.hasOwn(mocks, name)) return mocks[name]
-    if (name.startsWith('.')) return loadTs(path.resolve(path.dirname(absolute), name + '.ts'), mocks, globals)
+    if (name.startsWith('.') && name.endsWith('?raw')) return { default: fs.readFileSync(path.resolve(path.dirname(absolute), name.slice(0, -4)), 'utf8') }
+    if (name.startsWith('.')) {
+      const base = path.resolve(path.dirname(absolute), name)
+      if (name.endsWith('.mjs')) return require(base)
+      return loadTs(fs.existsSync(base + '.ts') ? base + '.ts' : base + '.tsx', mocks, globals)
+    }
     return require(name)
   }
   const wrapper = vm.runInNewContext('(function(exports, require, module) {\n' + source + '\n})', {

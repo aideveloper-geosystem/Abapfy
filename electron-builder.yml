@@ -6,10 +6,18 @@ files:
   - out/**
   - package.json
   - resources/**
+  - '!resources/local-search*/**'
+  - '!resources/.catalog-stage-*/**'
+  - '!resources/catalog-local-search.zip'
   - '!node_modules/**'
 asarUnpack:
   - resources/**
 win:
+  extraResources:
+    - from: resources/local-search
+      to: local-search
+      filter:
+        - '**/*'
   executableName: abapfy
   icon: resources/abapfy-horizon-mark.png
   target:
@@ -38,6 +46,7 @@ linux:
     - AppImage
   category: Development
 npmRebuild: false
+beforePack: build/validate-catalog-bundle.cjs
 publish:
   provider: github
   owner: aideveloper-geosystem

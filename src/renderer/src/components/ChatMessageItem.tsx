@@ -1,5 +1,5 @@
 import { memo, useRef } from 'react'
-import { AlertCircle, Bot, CheckCircle2, FileText, Globe, Loader2, Monitor, RefreshCw, XCircle } from 'lucide-react'
+import { Archive, Bot, FileText, Globe, RefreshCw } from 'lucide-react'
 import { Markdown } from './Markdown'
 import { EfDocxGenerator } from './EfDocxGenerator'
 import { StructuredJson } from './StructuredJson'
@@ -19,18 +19,25 @@ import { TechnicalResponse } from './TechnicalResponse'
 import { AiLoadingState, AiMessageActions } from './AiMessageActions'
 import type { EfDocumentJob } from '@renderer/lib/efDrive'
 import type { KnowledgeMatch } from '@renderer/lib/projectKnowledge'
+import type { LocalSearchActivity } from '../../../shared/localFeatures'
+import { ToolActivityBadges } from './ToolActivityBadges'
+import type { CompactionActivity } from '../../../shared/compaction'
+import './ContextMeter.css'
 
 export interface ToolActivityItem {
   id: string
   label: string
   /** web = pesquisa/leitura via server tools do Claude; source = fonte citada na resposta. */
-  kind: 'skill' | 'mcp' | 'sap' | 'web' | 'source' | 'document'
+  kind: 'skill' | 'mcp' | 'sap' | 'web' | 'source' | 'document' | 'local' | 'compact'
   status: 'running' | 'confirm' | 'done' | 'error'
   url?: string
   efDocument?: EfDocumentJob
+  localSearch?: LocalSearchActivity
+  compaction?: CompactionActivity
 }
 
 export interface UiMessage {
+  imageDataUrls?: string[]
   id: string
   role: 'user' | 'assistant'
   content: string
@@ -52,43 +59,6 @@ export interface UiMessage {
   /** Date.now() do início do bloco de thinking em andamento. */
   thinkingSince?: number
   knowledge?: KnowledgeMatch[]
-}
-
-function ToolActivityBadges({ items }: { items: ToolActivityItem[] }): JSX.Element {
-  const sapItems = items.filter((item) => item.kind === 'sap')
-  const activity = items.filter((item) => item.kind !== 'source')
-  const needsAttention = activity.some((item) => item.status !== 'done')
-  const status = activity.some((item) => item.status === 'confirm') ? 'Aguardando autorização' : activity.some((item) => item.status === 'running') ? 'Em andamento' : activity.some((item) => item.status === 'error') ? 'Com interrupções' : 'Concluída'
-  return (
-    <details className="ai-tool-details" open={needsAttention || undefined}>
-    <summary><Bot size={13} /> Atividade · {activity.length} {activity.length === 1 ? 'etapa' : 'etapas'} · {status}</summary>
-    <div>
-    {sapItems.length > 0 && <div className={`chat-sap-activity ${sapItems.some((item) => item.status === 'running') ? 'chat-sap-activity-live' : ''}`}>
-      <div className="chat-sap-activity-heading"><Monitor size={14} /> Contexto SAP <span>{sapItems.some((item) => item.status === 'confirm') ? 'aguardando autorização' : sapItems.some((item) => item.status === 'running') ? 'interagindo com SAP' : sapItems.some((item) => item.status === 'error') ? 'ação interrompida' : 'pronto'}</span></div>
-      <div className="chat-sap-activity-steps">{sapItems.map((item) => <div key={item.id} className={`chat-sap-activity-step chat-sap-activity-step-${item.status}`}>
-        {item.status === 'running' ? <Loader2 size={12} className="chat-tool-badge-spin" /> : item.status === 'confirm' ? <AlertCircle size={12} className="chat-tool-badge-pulse" /> : item.status === 'error' ? <XCircle size={12} /> : <CheckCircle2 size={12} />}
-        {item.label}
-      </div>)}</div>
-    </div>}
-    <div className="chat-tool-activity">
-      {items.filter((item) => item.kind !== 'sap' && item.kind !== 'source').map((item) => (
-        <span key={item.id} className={`chat-tool-badge chat-tool-badge-${item.status}`}>
-          {item.status === 'running' ? (
-            <Loader2 size={11} strokeWidth={2} className="chat-tool-badge-spin" />
-          ) : item.status === 'confirm' ? (
-            <AlertCircle size={11} strokeWidth={2} className="chat-tool-badge-pulse" />
-          ) : item.status === 'error' ? (
-            <XCircle size={11} strokeWidth={2} />
-          ) : (
-            <CheckCircle2 size={11} strokeWidth={2} />
-          )}
-          {item.status === 'confirm' ? `${item.label} · aguardando autorização` : item.label}
-        </span>
-      ))}
-    </div>
-    </div>
-    </details>
-  )
 }
 
 function SourceLinks({ items }: { items: ToolActivityItem[] }): JSX.Element {
@@ -176,10 +146,11 @@ export const ChatMessageItem = memo(function ChatMessageItem({
 
       {isUser ? (
         <div className="chat-message-user-bubble">
+          {!!message.imageDataUrls?.length && <div className="chat-message-image-previews">{message.imageDataUrls.map((url, index) => <img src={url} alt={`Imagem anexada ${index + 1}`} key={index} />)}</div>}
           {parsedUser?.attachments.length ? (
             <div className="chat-message-attachments">
-              {parsedUser.attachments.map((attachment) => (
-                <span key={attachment.name} className="chat-message-attachment-chip">
+              {parsedUser.attachments.map((attachment, index) => (
+                <span key={`${attachment.name}-${index}`} className="chat-message-attachment-chip">
                   <FileText size={11} strokeWidth={1.75} />
                   {attachment.name}
                 </span>
@@ -190,9 +161,10 @@ export const ChatMessageItem = memo(function ChatMessageItem({
         </div>
       ) : (
         <div className="chat-message-assistant-content" ref={contentRef}>
+          {message.toolActivity?.some((item) => item.kind === 'compact' && item.status === 'running') && <div className="context-compacting" role="status"><Archive size={20} className="context-spin" /><div><strong>Compactando contexto</strong><small>{message.toolActivity.find((item) => item.kind === 'compact' && item.status === 'running')?.label} · histórico original preservado</small></div></div>}
           {!!message.knowledge?.length && <details className="ai-tool-details"><summary><FileText size={13} /> Contexto consultado · {message.knowledge.length} trechos</summary><div className="ai-knowledge-cards">{message.knowledge.map((match, index) => <article key={`${match.documentId}-${index}`}><strong>{match.documentName}</strong><small>Versão {match.version} · {new Date(match.updatedAt).toLocaleDateString('pt-BR')} · relevância {Math.round(match.confidence * 100)}%</small><p>{match.excerpt}</p></article>)}</div></details>}
-          {message.toolActivity?.some((item) => item.kind !== 'source') && (
-            <ToolActivityBadges items={message.toolActivity} />
+          {message.toolActivity?.some((item) => item.kind !== 'source' || item.id === 'local-enhancements') && (
+            <ToolActivityBadges items={message.toolActivity.map((item) => item.id === 'local-enhancements' && item.kind === 'source' ? { ...item, kind: 'local' } : item)} />
           )}
           {(message.thinkingSince !== undefined || message.thinkingMs !== undefined) && (
             <ThinkingBlock activeSince={message.thinkingSince} text={message.thinkingText} ms={message.thinkingMs} />
@@ -225,7 +197,7 @@ export const ChatMessageItem = memo(function ChatMessageItem({
               onPrompt={onPrompt}
             />
           )}
-          {message.streaming && !message.content && message.thinkingSince === undefined && <AiLoadingState />}
+          {message.streaming && !message.content && message.thinkingSince === undefined && !message.toolActivity?.some((item) => item.kind === 'compact' && item.status === 'running') && <AiLoadingState />}
           {sources.length > 0 && !message.streaming && <SourceLinks items={sources} />}
           {message.streaming && message.thinkingSince === undefined && (
             <span className="chat-message-cursor" aria-hidden="true" />

@@ -1,5 +1,7 @@
 import { CodeComparison } from './CodeComparison'
 import { StructuredJson } from './StructuredJson'
+import { RichText } from './RichText'
+import { AiPresentation } from './AiPresentation'
 import type { StructuredValue } from '@renderer/lib/structuredResponse'
 import {
   technicalLocation,
@@ -30,7 +32,32 @@ export function TechnicalResponse({
         : 'Opções de enhancement'
   return (
     <div className="technical-response">
-      <StructuredJson data={metadata} localized />
+      {kind === 'enhancement' ? (
+        <>
+          {['summary', 'additional_notes'].map((key) =>
+            typeof metadata[key] === 'string' && metadata[key] ? (
+              <section className="ai-card" key={key}>
+                <header>
+                  <strong>
+                    {key === 'summary' ? 'Resumo da análise' : 'Evidências e próximos passos'}
+                  </strong>
+                </header>
+                <RichText content={metadata[key] as string} />
+              </section>
+            ) : null
+          )}
+          <StructuredJson
+            data={Object.fromEntries(
+              Object.entries(metadata).filter(
+                ([key]) => !['summary', 'additional_notes'].includes(key)
+              )
+            )}
+            localized
+          />
+        </>
+      ) : (
+        <StructuredJson data={metadata} localized />
+      )}
       {kind === 'performance' && data.score === null && (
         <p>
           Nota não atribuída: informação insuficiente. Consulte os critérios e limitações da
@@ -40,39 +67,31 @@ export function TechnicalResponse({
       <section>
         <h3>{heading}</h3>
         {kind === 'enhancement' && records.length > 0 && (
-          <div className="technical-response-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Opção</th>
-                  <th>Tipo</th>
-                  <th>Transação</th>
-                  <th>S/4HANA</th>
-                </tr>
-              </thead>
-              <tbody>
-                {records.map((item, index) => (
-                  <tr key={index}>
-                    <td>{text(item.name)}</td>
-                    <td>{text(item.type)}</td>
-                    <td>{text(item.transaction)}</td>
-                    <td>
-                      {item.s4hana_compatible === true
-                        ? 'Sim'
-                        : item.s4hana_compatible === false
-                          ? 'Não'
-                          : 'A confirmar'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <AiPresentation
+            data={{
+              version: 1,
+              blocks: [
+                {
+                  type: 'records',
+                  title: 'Comparar candidatos',
+                  columns: ['Opção', 'Tipo', 'Transação', 'S/4HANA'],
+                  rows: records
+                    .slice(0, 200)
+                    .map((item) => [
+                      text(item.name),
+                      text(item.type),
+                      text(item.transaction),
+                      typeof item.s4hana_compatible === 'boolean' ? item.s4hana_compatible : null
+                    ])
+                }
+              ]
+            }}
+          />
         )}
         {records.length === 0 && (
-          <p>
+          <p className={kind === 'enhancement' ? 'ai-card ai-empty' : undefined}>
             {kind === 'enhancement'
-              ? 'Nenhuma opção confirmada nesta análise. Consulte as pendências e evidências acima.'
+              ? 'Nenhuma opção recomendada nesta análise. Consulte as evidências e próximos passos acima.'
               : 'Nenhum achado listado. Isso não comprova cobertura completa nem validação em execução.'}
           </p>
         )}
@@ -85,7 +104,10 @@ export function TechnicalResponse({
             )
           )
           return (
-            <article className="technical-response-card" key={index}>
+            <article
+              className={`technical-response-card${kind === 'enhancement' ? ' ai-card' : ''}`}
+              key={index}
+            >
               <h4>
                 {index + 1}. {text(item.title ?? item.name, 'Achado')}
               </h4>

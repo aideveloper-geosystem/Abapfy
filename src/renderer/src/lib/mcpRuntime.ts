@@ -1,3 +1,4 @@
+import { claudeTurn, openAiTurn, geminiTurn } from './imagePayload'
 import type { AiProviderId } from '@renderer/lib/aiProviders'
 import type { ChatTurn } from '@renderer/lib/aiClient'
 import type { McpServerItem } from '@renderer/store/mcpStore'
@@ -166,7 +167,7 @@ async function buildResourceTools(configs: McpServerConfig[]): Promise<McpToolIn
 }
 
 async function runOpenAi(args: RunMcpArgs, configs: McpServerConfig[], tools: McpToolInfo[]): Promise<ToolExecution[]> {
-  const messages: Array<Record<string, unknown>> = [...(args.systemPrompt ? [{ role: 'system', content: args.systemPrompt }] : []), ...args.messages.map((turn) => ({ role: turn.role, content: turn.content }))]
+  const messages: Array<Record<string, unknown>> = [...(args.systemPrompt ? [{ role: 'system', content: args.systemPrompt }] : []), ...args.messages.map(openAiTurn)]
   const executions: ToolExecution[] = []
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
     const response = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', signal: args.signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${args.apiKey}` }, body: JSON.stringify({ model: args.model, stream: false, messages, tools: tools.map((tool) => ({ type: 'function', function: { name: tool.qualifiedName, description: `[${tool.serverName}] ${tool.description}`, parameters: tool.inputSchema } })), tool_choice: 'auto' }) })
@@ -188,7 +189,7 @@ async function runOpenAi(args: RunMcpArgs, configs: McpServerConfig[], tools: Mc
 }
 
 async function runClaude(args: RunMcpArgs, configs: McpServerConfig[], tools: McpToolInfo[]): Promise<ToolExecution[]> {
-  const messages: Array<Record<string, unknown>> = args.messages.map((message) => ({ ...message }))
+  const messages: Array<Record<string, unknown>> = args.messages.map(claudeTurn)
   const executions: ToolExecution[] = []
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
     const response = await fetch(ANTHROPIC_API_URL, { method: 'POST', signal: args.signal, headers: claudeHeaders(args.apiKey, args.model), body: JSON.stringify({ ...claudeToolLoopParams(args.model, 4096), ...(args.systemPrompt ? { system: args.systemPrompt } : {}), messages, tools: tools.map((tool) => ({ name: tool.qualifiedName, description: `[${tool.serverName}] ${tool.description}`, input_schema: tool.inputSchema })) }) })
@@ -209,7 +210,7 @@ async function runClaude(args: RunMcpArgs, configs: McpServerConfig[], tools: Mc
 }
 
 async function runGemini(args: RunMcpArgs, configs: McpServerConfig[], tools: McpToolInfo[]): Promise<ToolExecution[]> {
-  const contents: Array<Record<string, unknown>> = args.messages.map((message) => ({ role: message.role === 'assistant' ? 'model' : 'user', parts: [{ text: message.content }] }))
+  const contents: Array<Record<string, unknown>> = args.messages.map(geminiTurn)
   const executions: ToolExecution[] = []
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${args.model}:generateContent?key=${args.apiKey}`
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {

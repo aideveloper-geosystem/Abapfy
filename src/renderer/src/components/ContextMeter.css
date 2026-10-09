@@ -1,0 +1,121 @@
+.context-meter {
+  position: relative;
+  font-size: 11px;
+  color: var(--color-ink-muted);
+}
+.context-meter > summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+.context-meter > summary::-webkit-details-marker {
+  display: none;
+}
+.context-meter > summary:hover,
+.context-meter[open] > summary {
+  background: var(--color-surface-2);
+}
+.context-meter > summary:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.context-orb {
+  width: 16px;
+  height: 16px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+.context-meter-warning {
+  color: var(--color-semantic-warning);
+}
+.context-meter-panel {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: 0;
+  width: min(360px, 80vw);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-hairline);
+  border-radius: 12px;
+  padding: 16px;
+  z-index: 50;
+  box-shadow: 0 8px 32px #0003;
+  line-height: 1.6;
+}
+.context-meter-panel p {
+  margin: 8px 0;
+}
+.context-meter-panel button {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid var(--color-hairline);
+  border-radius: 8px;
+  padding: 8px;
+  color: var(--color-ink);
+  background: var(--color-surface-1);
+  cursor: pointer;
+}
+.context-meter-panel button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.context-meter-busy {
+  color: var(--color-primary);
+}
+.context-spin {
+  animation: context-spin 1s linear infinite;
+}
+.context-compacting {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 12px;
+  background: var(--color-surface-2);
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.context-compacting::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 30%;
+  height: 2px;
+  background: var(--color-primary);
+  animation: context-scan 1.5s ease-in-out infinite;
+}
+.context-compacting strong {
+  font-size: 13px;
+  display: block;
+}
+.context-compacting small {
+  font-size: 11px;
+  color: var(--color-ink-muted);
+}
+@keyframes context-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes context-scan {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(400%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .context-spin,
+  .context-compacting::after {
+    animation: none;
+  }
+}

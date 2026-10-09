@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { LocalFeaturesApi } from '../shared/localFeatures'
 
 const windowControls = {
   minimize: () => ipcRenderer.invoke('window:minimize'),
@@ -68,8 +69,7 @@ const updates = {
     return () => ipcRenderer.removeListener('updates:downloaded', listener)
   },
   onError: (callback: (message: string) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, message: string): void =>
-      callback(message)
+    const listener = (_event: Electron.IpcRendererEvent, message: string): void => callback(message)
     ipcRenderer.on('updates:error', listener)
     return () => ipcRenderer.removeListener('updates:error', listener)
   }
@@ -91,7 +91,8 @@ interface McpConfirmationResolved {
 const mcp = {
   closeAll: () => ipcRenderer.invoke('mcp:closeAll'),
   readLocalConfig: (userId: string) => ipcRenderer.invoke('mcp:readLocalConfig', userId),
-  saveLocalCatalog: (userId: string, catalog: unknown) => ipcRenderer.invoke('mcp:saveLocalCatalog', userId, catalog),
+  saveLocalCatalog: (userId: string, catalog: unknown) =>
+    ipcRenderer.invoke('mcp:saveLocalCatalog', userId, catalog),
   saveLocalServerConfig: (userId: string, serverId: string, config: unknown) =>
     ipcRenderer.invoke('mcp:saveLocalServerConfig', userId, serverId, config),
   pickDirectory: () => ipcRenderer.invoke('mcp:pickDirectory'),
@@ -105,7 +106,8 @@ const mcp = {
   readResource: (config: unknown, uri: string, callId?: string) =>
     ipcRenderer.invoke('mcp:readResource', config, uri, callId),
   listPrompts: (configs: unknown[]) => ipcRenderer.invoke('mcp:listPrompts', configs),
-  getPrompt: (config: unknown, name: string, args: Record<string, string>) => ipcRenderer.invoke('mcp:getPrompt', config, name, args),
+  getPrompt: (config: unknown, name: string, args: Record<string, string>) =>
+    ipcRenderer.invoke('mcp:getPrompt', config, name, args),
   onConfirmationPending: (callback: (event: McpConfirmationPending) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: McpConfirmationPending): void =>
       callback(payload)
@@ -122,22 +124,49 @@ const mcp = {
 
 const sapGui = {
   readSettings: (userId: string) => ipcRenderer.invoke('sapGui:readSettings', userId),
-  saveSettings: (userId: string, value: unknown) => ipcRenderer.invoke('sapGui:saveSettings', userId, value),
+  saveSettings: (userId: string, value: unknown) =>
+    ipcRenderer.invoke('sapGui:saveSettings', userId, value),
   listSessions: () => ipcRenderer.invoke('sapGui:listSessions'),
   snapshot: (userId: string) => ipcRenderer.invoke('sapGui:snapshot', userId),
   controlStatus: () => ipcRenderer.invoke('sapGui:controlStatus'),
-  control: (userId: string, action: unknown, callId: string, captureId: string) => ipcRenderer.invoke('sapGui:control', userId, action, callId, captureId),
+  control: (userId: string, action: unknown, callId: string, captureId: string) =>
+    ipcRenderer.invoke('sapGui:control', userId, action, callId, captureId),
   cancelControl: (callId: string) => ipcRenderer.send('sapGui:cancelControl', callId)
 }
 
+const localFeatures: LocalFeaturesApi = {
+  setCompaction: (userId, settings) =>
+    ipcRenderer.invoke('localFeatures:setCompaction', userId, settings),
+  loadContext: (userId, chatId) => ipcRenderer.invoke('localFeatures:loadContext', userId, chatId),
+  saveContext: (userId, chatId, snapshot) =>
+    ipcRenderer.invoke('localFeatures:saveContext', userId, chatId, snapshot),
+  status: (userId) => ipcRenderer.invoke('localFeatures:status', userId),
+  windowsDictationSupported: process.platform === 'win32',
+  openWindowsDictation: () => ipcRenderer.invoke('localFeatures:openWindowsDictation'),
+  setEmbeddingBackend: (userId, backend, token) =>
+    ipcRenderer.invoke('localFeatures:setEmbeddingBackend', userId, backend, token),
+  pickRuntimeFile: (userId, field, token) =>
+    ipcRenderer.invoke('localFeatures:pickRuntimeFile', userId, field, token),
+  importCatalog: (userId, token) =>
+    ipcRenderer.invoke('localFeatures:importCatalog', userId, token),
+  indexCatalog: (userId, token) => ipcRenderer.invoke('localFeatures:indexCatalog', userId, token),
+  publishCatalog: (userId, token) =>
+    ipcRenderer.invoke('localFeatures:publishCatalog', userId, token),
+  cancelIndex: (userId, token) => ipcRenderer.invoke('localFeatures:cancelIndex', userId, token),
+  cancel: (userId) => ipcRenderer.invoke('localFeatures:cancel', userId),
+  search: (userId, query) => ipcRenderer.invoke('localFeatures:search', userId, query)
+}
+
 const api = {
+  localFeatures,
   windowControls,
   updates,
   mcp,
   sapGui,
   documents: {
     renderPdf: (html: string) => ipcRenderer.invoke('document:renderPdf', html) as Promise<string>,
-    openDocx: (bytes: Uint8Array, fileName: string) => ipcRenderer.invoke('document:openDocx', bytes, fileName) as Promise<void>
+    openDocx: (bytes: Uint8Array, fileName: string) =>
+      ipcRenderer.invoke('document:openDocx', bytes, fileName) as Promise<void>
   }
 }
 

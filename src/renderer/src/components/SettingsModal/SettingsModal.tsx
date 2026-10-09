@@ -1,5 +1,18 @@
 import { useEffect, useState } from 'react'
-import { Bot, Building2, Download, Palette, Monitor, Server, SlidersHorizontal, Shield, UserRound, Search, X } from 'lucide-react'
+import {
+  Bot,
+  Building2,
+  Download,
+  Palette,
+  Monitor,
+  Server,
+  SlidersHorizontal,
+  Database,
+  Shield,
+  UserRound,
+  Search,
+  X
+} from 'lucide-react'
 import { GeneralSection } from './GeneralSection'
 import { ProfileSection } from './ProfileSection'
 import { AiSection } from './AiSection'
@@ -8,18 +21,34 @@ import { UpdatesSection } from './UpdatesSection'
 import { McpSection } from './McpSection'
 import { SapContextSection } from './SapContextSection'
 import { AdministrationSection } from './AdministrationSection'
+import { FeaturesSection } from './FeaturesSection'
+import { CatalogAdministration } from './CatalogAdministration'
+import { useAuthStore } from '@renderer/store/authStore'
 import './SettingsModal.css'
 
-type SectionId = 'profile' | 'general' | 'ai' | 'mcp' | 'sap-context' | 'parametros' | 'clients' | 'administration' | 'updates'
+type SectionId =
+  | 'profile'
+  | 'general'
+  | 'ai'
+  | 'mcp'
+  | 'sap-context'
+  | 'parametros'
+  | 'clients'
+  | 'administration'
+  | 'updates'
+  | 'features'
+  | 'embeddings'
 
 const SECTIONS: { id: SectionId; label: string; icon: typeof Palette; group: string }[] = [
   { id: 'profile', label: 'Perfil', icon: UserRound, group: 'Pessoal' },
   { id: 'general', label: 'Aparência', icon: Palette, group: 'Pessoal' },
   { id: 'ai', label: 'Inteligência Artificial', icon: Bot, group: 'Trabalho' },
+  { id: 'features', label: 'Features', icon: SlidersHorizontal, group: 'Trabalho' },
   { id: 'mcp', label: 'MCP', icon: Server, group: 'Trabalho' },
   { id: 'sap-context', label: 'Computer use · SAP', icon: Monitor, group: 'Trabalho' },
   { id: 'parametros', label: 'Parâmetros', icon: SlidersHorizontal, group: 'Trabalho' },
   { id: 'clients', label: 'Clientes', icon: Building2, group: 'Workspace' },
+  { id: 'embeddings', label: 'Embeddings', icon: Database, group: 'Workspace' },
   { id: 'administration', label: 'Administração', icon: Shield, group: 'Workspace' },
   { id: 'updates', label: 'Atualizações', icon: Download, group: 'Sistema' }
 ]
@@ -30,12 +59,31 @@ interface SettingsModalProps {
   onOpenClients: () => void
 }
 
-export function SettingsModal({ open, onClose, onOpenClients }: SettingsModalProps): JSX.Element | null {
+export function SettingsModal({
+  open,
+  onClose,
+  onOpenClients
+}: SettingsModalProps): JSX.Element | null {
   const [activeSection, setActiveSection] = useState<SectionId>('profile')
+  const role = useAuthStore((state) => state.role)
+  const refreshRole = useAuthStore((state) => state.refreshRole)
+  const canManageCatalog = role === 'MASTER' || role === 'ADMIN'
   const [query, setQuery] = useState('')
-  const visibleSections = SECTIONS.filter((section) =>
-    `${section.label} ${section.group}`.toLocaleLowerCase('pt-BR').includes(query.trim().toLocaleLowerCase('pt-BR'))
+  const visibleSections = SECTIONS.filter(
+    (section) =>
+      (section.id !== 'embeddings' || canManageCatalog) &&
+      `${section.label} ${section.group} ${section.id === 'embeddings' ? 'catálogo SAP BAdI BAPI indexação' : ''}`
+        .toLocaleLowerCase('pt-BR')
+        .includes(query.trim().toLocaleLowerCase('pt-BR'))
   )
+
+  useEffect(() => {
+    if (open) void refreshRole()
+  }, [open, refreshRole])
+
+  useEffect(() => {
+    if (!canManageCatalog && activeSection === 'embeddings') setActiveSection('administration')
+  }, [canManageCatalog, activeSection])
 
   useEffect(() => {
     if (!open) return
@@ -50,24 +98,44 @@ export function SettingsModal({ open, onClose, onOpenClients }: SettingsModalPro
 
   return (
     <div className="settings-overlay" onMouseDown={onClose}>
-      <div className="settings-modal settings-modal-wide" role="dialog" aria-modal="true" aria-label="Configurações" onMouseDown={(event) => event.stopPropagation()}>
+      <div
+        className="settings-modal settings-modal-wide"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Configurações"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
         <nav className="settings-nav" aria-label="Seções das configurações">
           <span className="settings-nav-title">Configurações</span>
           <label className="settings-nav-search">
             <Search size={15} aria-hidden="true" />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Pesquisar" aria-label="Pesquisar configurações" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Pesquisar"
+              aria-label="Pesquisar configurações"
+            />
           </label>
           <div className="settings-nav-list">
             {visibleSections.map(({ id, label, icon: Icon, group }, index) => (
               <div key={id}>
-                {(index === 0 || visibleSections[index - 1].group !== group) && <span className="settings-nav-group">{group}</span>}
-                <button type="button" className={`settings-nav-item ${activeSection === id ? 'settings-nav-item-active' : ''}`} aria-current={activeSection === id ? 'page' : undefined} onClick={() => setActiveSection(id)}>
+                {(index === 0 || visibleSections[index - 1].group !== group) && (
+                  <span className="settings-nav-group">{group}</span>
+                )}
+                <button
+                  type="button"
+                  className={`settings-nav-item ${activeSection === id ? 'settings-nav-item-active' : ''}`}
+                  aria-current={activeSection === id ? 'page' : undefined}
+                  onClick={() => setActiveSection(id)}
+                >
                   <Icon size={16} strokeWidth={1.75} />
                   {label}
                 </button>
               </div>
             ))}
-            {visibleSections.length === 0 && <span className="settings-nav-empty">Nenhuma configuração encontrada.</span>}
+            {visibleSections.length === 0 && (
+              <span className="settings-nav-empty">Nenhuma configuração encontrada.</span>
+            )}
           </div>
         </nav>
         <div className="settings-content">
@@ -77,6 +145,16 @@ export function SettingsModal({ open, onClose, onOpenClients }: SettingsModalPro
           {activeSection === 'profile' && <ProfileSection />}
           {activeSection === 'general' && <GeneralSection />}
           {activeSection === 'ai' && <AiSection />}
+          {activeSection === 'features' && <FeaturesSection />}
+          {activeSection === 'embeddings' && canManageCatalog && (
+            <div className="settings-section">
+              <header className="settings-section-header">
+                <h2>Embeddings · Catálogo SAP</h2>
+                <p>Administração da base compartilhada distribuída nas atualizações.</p>
+              </header>
+              <CatalogAdministration />
+            </div>
+          )}
           {activeSection === 'mcp' && <McpSection />}
           {activeSection === 'sap-context' && <SapContextSection />}
           {activeSection === 'parametros' && <ParametrosSection />}
@@ -86,12 +164,26 @@ export function SettingsModal({ open, onClose, onOpenClients }: SettingsModalPro
                 <h2>Clientes</h2>
                 <p>Configure clientes, módulos e workbooks na área compartilhada.</p>
               </header>
-              <button type="button" className="settings-action" onClick={() => { onClose(); onOpenClients() }}>
+              <button
+                type="button"
+                className="settings-action"
+                onClick={() => {
+                  onClose()
+                  onOpenClients()
+                }}
+              >
                 Abrir gerenciamento de clientes
               </button>
             </div>
           )}
-          {activeSection === 'administration' && <AdministrationSection onOpenClients={() => { onClose(); onOpenClients() }} />}
+          {activeSection === 'administration' && (
+            <AdministrationSection
+              onOpenClients={() => {
+                onClose()
+                onOpenClients()
+              }}
+            />
+          )}
           {activeSection === 'updates' && <UpdatesSection />}
         </div>
       </div>

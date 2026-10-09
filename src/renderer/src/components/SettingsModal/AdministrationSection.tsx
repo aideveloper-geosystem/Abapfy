@@ -18,6 +18,7 @@ import { supabase } from '@renderer/lib/supabaseClient'
 import { useAuthStore } from '@renderer/store/authStore'
 import { useClientsStore } from '@renderer/store/clientsStore'
 import './AdministrationSection.css'
+import { CatalogAdministration } from './CatalogAdministration'
 
 interface TeamMember {
   email: string
@@ -212,6 +213,7 @@ export function AdministrationSection({ onOpenClients }: Props): JSX.Element {
           {!notice.error && <CheckCircle2 size={16} />} {notice.text}
         </div>
       )}
+      {role && <CatalogAdministration />}
       {role && (
         <div className="administration-stats">
           <div>

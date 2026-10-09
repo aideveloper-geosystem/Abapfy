@@ -185,6 +185,8 @@ export function applyEfTemplateEdits(
     if (
       typeof edit.text !== 'string' ||
       edit.text.length > 120_000 ||
+      // XML do Word não admite estes caracteres de controle.
+      // eslint-disable-next-line no-control-regex
       /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(edit.text)
     )
       throw new Error('Texto de edição inválido no modelo EF.')

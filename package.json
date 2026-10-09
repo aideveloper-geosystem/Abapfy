@@ -1,6 +1,6 @@
 {
   "name": "abapfy",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Abapfy — cliente desktop de chat com ferramentas para o ecossistema SAP/ABAP",
   "main": "./out/main/index.js",
   "author": "Abapfy",
@@ -14,11 +14,13 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm typecheck:node && pnpm typecheck:web",
-    "lint": "eslint . --ext .ts,.tsx",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "format": "prettier --write .",
     "build:win": "pnpm build && electron-builder --win",
     "build:mac": "pnpm build && electron-builder --mac",
-    "build:unpack": "pnpm build && electron-builder --dir"
+    "build:unpack": "pnpm build && electron-builder --dir",
+    "catalog:prepare": "node scripts/prepare-catalog-bundle.mjs",
+    "catalog:archive": "node scripts/archive-catalog-bundle.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.25.3",

@@ -1,5 +1,7 @@
+import { claudeTurn, openAiTurn, geminiTurn } from './imagePayload'
 import { supabase } from '@renderer/lib/supabaseClient'
 import type { AiProviderId } from '@renderer/lib/aiProviders'
+import { contextSummarySchema, type ContextSummary } from '../../../shared/compaction'
 import {
   ANTHROPIC_API_URL,
   claudeHeaders,
@@ -13,12 +15,8 @@ export interface ChatTurn {
   content: string
   /** Captura visual efêmera da janela SAP, somente no turno atual. */
   imageDataUrl?: string
-}
-
-function pngBase64(turn: { role: string; imageDataUrl?: string }): string | null {
-  if (turn.role !== 'user' || !turn.imageDataUrl?.startsWith('data:image/png;base64,')) return null
-  const data = turn.imageDataUrl.slice('data:image/png;base64,'.length)
-  return data.length <= 8 * 1024 * 1024 && /^[A-Za-z0-9+/=]+$/.test(data) ? data : null
+  /** Imagens anexadas ao chat, mantidas em memória na sessão. */
+  imageDataUrls?: string[]
 }
 
 export const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
@@ -36,6 +34,29 @@ export const ROUTER_MODEL = 'claude-haiku-5-5'
 
 // Classificação curta: esforço baixo reduz latência; o orçamento inclui thinking.
 const ROUTER_MAX_TOKENS = 2048
+
+export async function countClaudeContext(args: { apiKey: string; model: string; messages: ChatTurn[]; prompt: string; signal: AbortSignal }): Promise<number | null> {
+  try {
+    const response = await fetch(`${ANTHROPIC_API_URL}/count_tokens`, { method: 'POST', signal: AbortSignal.any([args.signal, AbortSignal.timeout(10000)]), headers: claudeHeaders(args.apiKey, args.model), body: JSON.stringify({ model: args.model, ...(args.prompt ? { system: args.prompt } : {}), messages: args.messages.map(claudeTurn) }) })
+    if (!response.ok) return null
+    const data = await response.json()
+    return Number.isSafeInteger(data.input_tokens) && data.input_tokens > 0 ? data.input_tokens : null
+  } catch { args.signal.throwIfAborted(); return null }
+}
+
+export async function summarizeWithRouter(args: { apiKey: string; system: string; content: string; maxTokens: number; signal: AbortSignal }): Promise<{ summary: ContextSummary; inputTokens: number; outputTokens: number }> {
+  const response = await fetch(ANTHROPIC_API_URL, {
+    method: 'POST', signal: AbortSignal.any([args.signal, AbortSignal.timeout(90000)]),
+    headers: claudeHeaders(args.apiKey, ROUTER_MODEL),
+    body: JSON.stringify({ ...claudeModelParams(ROUTER_MODEL, { effort: 'low', maxTokens: args.maxTokens, thinkingMaxTokens: args.maxTokens * 2 }), system: args.system, messages: [{ role: 'user', content: args.content }] })
+  })
+  if (!response.ok) throw new Error(`Router indisponível para compactação (HTTP ${response.status}).`)
+  const data = await response.json()
+  if (data.stop_reason !== 'end_turn' || !Array.isArray(data.content)) throw new Error('O router não concluiu o resumo. O contexto original foi preservado.')
+  const raw = data.content.filter((block: { type: string; text?: string }) => block.type === 'text' && typeof block.text === 'string').map((block: { text: string }) => block.text).join('').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+  const summary = contextSummarySchema.parse(JSON.parse(raw))
+  return { summary, inputTokens: (data.usage?.input_tokens ?? 0) + (data.usage?.cache_read_input_tokens ?? 0) + (data.usage?.cache_creation_input_tokens ?? 0), outputTokens: data.usage?.output_tokens ?? 0 }
+}
 
 async function requestRouter(
   claudeApiKey: string,
@@ -257,12 +278,7 @@ async function streamOpenAi(args: StreamChatArgs): Promise<void> {
       model: args.model,
       stream: true,
       stream_options: { include_usage: true },
-      messages: messages.map((turn) => {
-        const image = pngBase64(turn)
-        return { role: turn.role, content: image
-          ? [{ type: 'text', text: turn.content }, { type: 'image_url', image_url: { url: `data:image/png;base64,${image}` } }]
-          : turn.content }
-      })
+      messages: messages.map(openAiTurn)
     })
   })
 
@@ -305,12 +321,7 @@ async function streamGemini(args: StreamChatArgs): Promise<void> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${args.model}:streamGenerateContent?alt=sse&key=${args.apiKey}`
 
   const body: Record<string, unknown> = {
-    contents: args.messages.map((turn) => ({
-      role: turn.role === 'assistant' ? 'model' : 'user',
-      parts: pngBase64(turn)
-        ? [{ inlineData: { mimeType: 'image/png', data: pngBase64(turn) } }, { text: turn.content }]
-        : [{ text: turn.content }]
-    }))
+    contents: args.messages.map(geminiTurn)
   }
   if (args.systemPrompt) {
     body.systemInstruction = { parts: [{ text: args.systemPrompt }] }
@@ -377,12 +388,7 @@ async function streamClaude(args: StreamChatArgs): Promise<void> {
         stream: true,
         ...(tools ? { tools } : {}),
         ...(args.systemPrompt ? { system: args.systemPrompt } : {}),
-        messages: args.messages.map((turn) => {
-          const image = pngBase64(turn)
-          return { role: turn.role, content: image
-            ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: image } }, { type: 'text', text: turn.content }]
-            : turn.content }
-        })
+        messages: args.messages.map(claudeTurn)
       })
     })
 

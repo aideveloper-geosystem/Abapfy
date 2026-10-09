@@ -18,6 +18,8 @@ const { StructuredJson } = loadTs('src/renderer/src/components/StructuredJson.ts
   '@renderer/lib/structuredPresentation': presentation
 })
 const { TechnicalResponse } = loadTs('src/renderer/src/components/TechnicalResponse.tsx', {
+  './RichText': loadTs('src/renderer/src/components/RichText.tsx', { './Markdown.css': {} }),
+  './AiPresentation': loadTs('src/renderer/src/components/AiPresentation.tsx', { './AiInterface.css': {}, '@renderer/lib/aiPresentation': loadTs('src/renderer/src/lib/aiPresentation.ts') }),
   './CodeComparison': loadTs('src/renderer/src/components/CodeComparison.tsx', {
     './CodeBlock': { CodeBlock: ({ code }) => React.createElement('pre', { 'data-code': true }, code) },
     '@renderer/lib/codeDiff': loadTs('src/renderer/src/lib/codeDiff.ts'),
@@ -78,6 +80,18 @@ test('compatibility can be unknown and identifiers are not invented source locat
     'ZTEST · linha 12–16'
   )
   assert.equal(technical.technicalResponseKind({ specification: {}, business_context: {} }), null)
+})
+
+test('enhancement renders Markdown observations and an interactive candidate table without dispatching embedded UI', () => {
+  const html = renderToStaticMarkup(React.createElement(TechnicalResponse, { kind: 'enhancement', data: {
+    summary: 'Análise parcial', additional_notes: '**Dados extraídos**\n\n- Fonte: BADI.csv\n- Método a confirmar\n\n<script>unsafe()</script>',
+    recommendations: [{ name: 'ME_PROCESS_PO_CUST', type: 'BAdI', s4hana_compatible: null, code_skeleton: '' }]
+  } }))
+  assert.match(html, /<strong>Dados extraídos<\/strong>/)
+  assert.match(html, /<li>Fonte: BADI.csv<\/li>/)
+  assert.match(html, /Buscar em Comparar candidatos/)
+  assert.match(html, /A confirmar/)
+  assert.doesNotMatch(html, /<script>/)
 })
 
 test('technical review presents comparison, location and explanation without misclassifying prose', () => {

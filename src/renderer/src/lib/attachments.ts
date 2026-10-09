@@ -12,6 +12,7 @@ export interface AttachmentFile {
   size: number
   status: 'reading' | 'ready' | 'error'
   content?: string
+  imageDataUrl?: string
   error?: string
 }
 

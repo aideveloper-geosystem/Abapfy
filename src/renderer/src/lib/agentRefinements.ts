@@ -1,3 +1,5 @@
+import enhancementFinderContract from '../agents/enhancement-finder.md?raw'
+
 // Applied per turn so refinements also reach existing chats without overwriting
 // administrator-managed prompts or requiring a database migration.
 const COMMON = `## Refinamento de resposta — regras prioritárias
@@ -8,11 +10,7 @@ const CONTRACTS: Record<string, string> = {
 Faça revisão, não criação de programa nem alteração automática. Não classifique uma situação como critical só por pertencer a uma lista: justifique severidade por impacto, exposição e condições demonstradas. Distingua ausência comprovada de autorização de trecho insuficiente para verificar a autorização.
 Em findings mantenha id, title, severity, category, file, line_start, line_end, description, impact, original_code, suggested_code. Só informe linhas conhecidas, em base 1; caso contrário use null e explique a localização. original_code deve reproduzir o trecho fornecido; suggested_code é proposta, não aplicada. Quando a correção depender de contexto ausente, deixe suggested_code vazio e explique o que validar.
 Acrescente evidence (trecho/rotina que fundamenta o achado), confidence (confirmed|hypothesis|a_confirmar) e validation (lista de verificações relevantes). Não rotule código como aprovado se os arquivos/contexto estiverem incompletos: use verdict a_confirmar. Calcule statistics a partir dos findings efetivamente emitidos.`,
-  enhancement_finder: `## Seleção de enhancements
-Apresente somente opções identificadas com evidência suficiente, mesmo que seja uma única opção. A regra de 3 a 6 opções deixa de ser obrigatória. Se nenhuma opção puder ser identificada, recommendations deve ser [] e explique como pesquisar; não preencha a lista com nomes inventados.
-Não confunda comandos ABAP MODIFY com modificação de um objeto SAP standard. Priorize extensões suportadas compatíveis com o processo e a edição/release do cliente.
-Em cada recommendation mantenha rank, type, name, interface_method, description, when_called, pros, cons, transaction. Acrescente evidence (fonte/lista fornecida), confidence (confirmed|hypothesis|a_confirmar), prerequisites e validation (listas). s4hana_compatible pode ser true, false ou null; null significa A CONFIRMAR. Acrescente compatibility_note com edição/release e fundamento, sem assumir que compatibilidade on-premise implica disponibilidade em Cloud.
-code_skeleton só deve conter ABAP quando a interface/método e assinatura estiverem comprovados no contexto ou documentação consultada. Caso contrário deixe vazio e explique a pendência. Esqueletos são propostas, nunca código executado ou ativado.`,
+  enhancement_finder: enhancementFinderContract,
   performance_analyzer: `## Diagnóstico de performance
 Trate padrões encontrados por inspeção estática como candidatos a gargalo. A gravidade depende de frequência, volume, cardinalidade e impacto; não aplique automaticamente a lista antiga de critical/high. Não classifique um LOOP AT isolado como O(n²); BINARY SEARCH se refere à busca em tabela interna e exige ordenação compatível, não à sintaxe de LOOP AT. Não recomende índices sem avaliar acesso, seletividade e plano.
 Em issues mantenha title, severity, line_hint, description, impact, fix_description e fix_code; acrescente evidence, confidence (confirmed|hypothesis|a_confirmar), measurement_status (measured|not_measured), measurement (dados reais ou A CONFIRMAR) e validation (como comparar antes/depois preservando o resultado funcional). Não invente percentuais de ganho, tempos ou planos. Só escreva fix_code quando houver contexto suficiente; caso contrário deixe vazio.

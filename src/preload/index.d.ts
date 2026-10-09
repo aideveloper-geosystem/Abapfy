@@ -180,6 +180,7 @@ export interface SapGuiApi {
 }
 
 export interface Api {
+  localFeatures: import('../shared/localFeatures').LocalFeaturesApi
   windowControls: WindowControlsApi
   updates: UpdatesApi
   mcp: McpApi

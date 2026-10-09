@@ -140,7 +140,7 @@ export function recalculateEstimate(
   if (Object.values(factoredBase).some((hours) => !Number.isFinite(hours) || hours < 0)) {
     warnings.push('Fatores do cliente inválidos. Revise os parâmetros antes de recalcular.')
   }
-  ;(['agressiva', 'segura', 'tranquila'] as const).forEach((key) => {
+  (['agressiva', 'segura', 'tranquila'] as const).forEach((key) => {
     const previous = original.estimativas[key]
     const sum = Object.values(previous.distribuicao).reduce(
       (total, hours) => total + (hours ?? 0),

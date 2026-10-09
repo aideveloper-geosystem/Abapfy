@@ -32,7 +32,7 @@ function text(value: StructuredValue | undefined): string {
   if (object(value)) return Object.entries(value).map(([key, item]) => `${label(key)}: ${text(item)}`).join('; ')
   const raw = typeof value === 'boolean' ? (value ? 'Sim' : 'Não') : String(value)
   return (values[raw] ?? raw).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/[\\`*_{}\[\]()#+.!|~-]/g, '\\$&').replace(/\r?\n/g, ' ')
+    .replace(/[\\`*_{}[\]()#+.!|~-]/g, '\\$&').replace(/\r?\n/g, ' ')
 }
 
 function details(value: StructuredValue): string {

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { setupAutoUpdater } from './updater'
 import { openGeneratedDocx } from './documentFiles'
+import { registerLocalFeatures, closeLocalFeatures } from './localFeatures'
 import {
   callMcpTool,
   cancelMcpCall,
@@ -318,6 +319,7 @@ app.whenReady().then(() => {
 
   registerWindowControlIpc()
   registerDocumentIpc()
+  registerLocalFeatures(() => mainWindow)
   registerMcpIpc()
   registerSapGuiIpc()
   createWindow()
@@ -338,5 +340,6 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  closeLocalFeatures()
   void closeMcpClients()
 })

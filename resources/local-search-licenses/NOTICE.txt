@@ -1,0 +1,18 @@
+Abapfy local SAP search distribution
+
+EmbeddingGemma 2: Google DeepMind. Model weights licensed under Apache License 2.0.
+Original model: https://huggingface.co/google/embeddinggemma-2
+Q8_0 GGUF conversion: https://huggingface.co/ggml-org/embeddinggemma-2-GGUF
+The distributed model is the text GGUF Q8_0 variant provided by ggml-org.
+Model cards and Apache License 2.0 accompany this distribution.
+
+llama.cpp runtime: ggml-org, licensed under MIT.
+https://github.com/ggml-org/llama.cpp
+LLVM OpenMP license accompanies the runtime binaries where applicable.
+
+Abapfy converts its precomputed SAP search vectors to float32 little-endian.
+The SAP catalog and the vector index are application data, separate from model weights.
+
+Microsoft Visual C++ runtime: Microsoft Corporation.
+Redistributable x64 CRT libraries supplied with the licensed Visual Studio installation.
+Redistribution list accompanies the runtime. These libraries are not covered by the MIT or Apache licenses above.

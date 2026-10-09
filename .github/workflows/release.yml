@@ -46,8 +46,36 @@ jobs:
       - name: Check types
         run: pnpm typecheck
 
+      - name: Lint desktop application
+        run: pnpm lint
+
       - name: Test application behavior
-        run: node --test tests/ai-presentation.test.mjs tests/agent-refinements.test.mjs tests/clients-store.test.mjs tests/customizing-response.test.mjs tests/ef-drive.test.mjs tests/sap-control.test.mjs tests/haiku-router.test.mjs
+        run: node --test tests/ai-presentation.test.mjs tests/agent-refinements.test.mjs tests/clients-store.test.mjs tests/customizing-response.test.mjs tests/ef-drive.test.mjs tests/sap-control.test.mjs tests/haiku-router.test.mjs tests/catalog-bundle.test.mjs tests/local-features.test.mjs tests/context-compaction.test.mjs tests/local-search-ui.test.mjs tests/image-attachments.test.mjs
+
+      - name: Fetch administrator-published SAP catalog
+        if: matrix.artifact == 'windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CATALOG_BUNDLE_TAG: ${{ vars.CATALOG_BUNDLE_TAG }}
+          CATALOG_BUNDLE_SHA256: ${{ vars.CATALOG_BUNDLE_SHA256 }}
+        run: |
+          if (-not $env:CATALOG_BUNDLE_TAG -or $env:CATALOG_BUNDLE_SHA256 -notmatch '^[a-fA-F0-9]{64}$') { throw 'Configure CATALOG_BUNDLE_TAG e CATALOG_BUNDLE_SHA256 com o pacote preparado pelo administrador.' }
+          New-Item -ItemType Directory -Force tmp/catalog | Out-Null
+          gh release download $env:CATALOG_BUNDLE_TAG --repo $env:GITHUB_REPOSITORY --pattern catalog-local-search.zip --dir tmp/catalog
+          if ($LASTEXITCODE -ne 0) { throw 'Não foi possível baixar o catálogo publicado.' }
+          $archive = (Resolve-Path -LiteralPath tmp/catalog/catalog-local-search.zip).Path
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $env:CATALOG_BUNDLE_SHA256) { throw 'Checksum do pacote de catálogo divergente.' }
+          $destination = [IO.Path]::GetFullPath((Join-Path (Get-Location) resources/local-search))
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [IO.Compression.ZipFile]::OpenRead($archive)
+          try {
+            foreach ($entry in $zip.Entries) {
+              $resolved = [IO.Path]::GetFullPath((Join-Path $destination $entry.FullName))
+              if (-not $resolved.StartsWith($destination + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Arquivo fora do pacote de catálogo.' }
+            }
+          } finally { $zip.Dispose() }
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination
 
       - name: Build renderer/main
         run: pnpm build

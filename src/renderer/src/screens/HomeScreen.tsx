@@ -1,3 +1,4 @@
+import { clipboardImages, isImageFile, readImageAttachment, MAX_IMAGE_ATTACHMENTS } from '@renderer/lib/imageAttachments'
 import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
@@ -11,7 +12,6 @@ import {
   FolderOpen,
   Layers3,
   Loader2,
-  Mic,
   Paperclip,
   RotateCcw,
   Sparkles,
@@ -21,6 +21,14 @@ import {
 } from 'lucide-react'
 import abapfyLogo from '@renderer/assets/abapfy-horizon-mark.png'
 import { Sidebar } from '@renderer/components/Sidebar'
+import { WindowsDictationButton } from '@renderer/components/WindowsDictationButton'
+import { useLocalFeaturesStore } from '@renderer/store/localFeaturesStore'
+import { localSearchEvidence } from '@renderer/lib/localEnhancementSearch'
+import { prepareContext } from '@renderer/lib/prepareContext'
+import { compactionBoundary, contextTokens, estimateTokens, restoredContext, validSnapshot } from '@renderer/lib/contextCompactor'
+import { useContextStore } from '@renderer/store/contextStore'
+import { ContextMeter } from '@renderer/components/ContextMeter'
+import { DEFAULT_COMPACTION } from '../../../shared/compaction'
 import { SettingsModal } from '@renderer/components/SettingsModal/SettingsModal'
 import {
   ChatMessageItem,
@@ -69,6 +77,7 @@ import {
   CLAUDE_EFFORT_LEVELS,
   ROUTER_MODEL,
   fetchApiKey,
+  countClaudeContext,
   routeConversation,
   routeSkills,
   streamChat,
@@ -147,6 +156,7 @@ export function HomeScreen(): JSX.Element {
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null)
   const [currentProject, setCurrentProject] = useState<ProjectSummary | null>(null)
   const [sessionSkillNames, setSessionSkillNames] = useState<string[]>([])
+  const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<AttachmentFile[]>([])
   const [currentClientId, setCurrentClientId] = useState<string | null>(null)
   const [currentModuleId, setCurrentModuleId] = useState<string | null>(null)
@@ -312,6 +322,57 @@ export function HomeScreen(): JSX.Element {
   const routerAllowed = managedModels.some((model) => model.provider === 'claude' && model.model_id === ROUTER_MODEL && model.enabled &&
     !modelBlocks.some((block) => block.user_id === user?.id && block.provider === 'claude' && block.model_id === ROUTER_MODEL))
 
+  const contextKey = user && currentChatId ? `${user.id}:${currentChatId}` : ''
+  const contextState = useContextStore((state) => state.contexts[contextKey])
+  const compactionSettings = useLocalFeaturesStore((state) => state.userId === user?.id ? state.status?.settings.compaction : undefined) ?? DEFAULT_COMPACTION
+  useEffect(() => { if (user) void useLocalFeaturesStore.getState().load(user.id) }, [user])
+  useEffect(() => {
+    if (!user || !currentChatId || isStreaming) return
+    let active = true
+    const turns = messages.filter((message) => !message.error && message.content.trim()).map(({ role, content, imageDataUrls }) => ({ role, content, imageDataUrls }))
+    void window.api.localFeatures.loadContext(user.id, currentChatId).then((saved) => validSnapshot(saved, turns)).then((snapshot) => {
+      if (active) useContextStore.getState().update(contextKey, { snapshot: snapshot && snapshot.coveredCount <= compactionBoundary(turns, compactionSettings.recentTurns) ? snapshot : null })
+    }).catch((error: Error) => { if (active) useContextStore.getState().update(contextKey, { error: error.message }) })
+    return () => { active = false }
+  }, [contextKey, currentChatId, messages, isStreaming, user, compactionSettings.recentTurns])
+  const contextUsed = useMemo(() => {
+    const turns = messages.filter((message) => !message.error && message.content.trim()).map(({ role, content, imageDataUrls }) => ({ role, content, imageDataUrls }))
+    return contextTokens(restoredContext(turns, contextState?.snapshot ?? null, input)) + (contextState?.systemTokens ?? estimateTokens(systemPrompt ?? '')) + estimateTokens(input) + attachments.reduce((total, attachment) => total + estimateTokens(attachment.content ?? '') + (attachment.imageDataUrl ? 4096 : 0), 0)
+  }, [messages, contextState?.snapshot, contextState?.systemTokens, systemPrompt, input, attachments])
+
+  async function authorizeCompactionRouter(userId: string): Promise<string> {
+    if (useAuthStore.getState().user?.id !== userId) throw new DOMException('Conta alterada', 'AbortError')
+    const { data, error } = await supabase.rpc('can_use_ai_model', { p_provider: 'claude', p_model_id: ROUTER_MODEL })
+    if (error || !data) throw new Error('O router está desativado ou bloqueado para sua conta. O contexto anterior foi preservado.')
+    const key = await fetchApiKey(userId, 'claude')
+    if (!key) throw new Error('Configure uma chave Claude para o router compactar o contexto.')
+    if (useAuthStore.getState().user?.id !== userId) throw new DOMException('Conta alterada', 'AbortError')
+    return key
+  }
+
+  async function handleCompact(): Promise<void> {
+    if (!user || !currentChatId || isStreaming) { setModelChoiceError('Abra uma conversa e aguarde a resposta antes de compactar.'); return }
+    const chatId = currentChatId, userId = user.id, rt = useChatRuntimeStore.getState()
+    const turns = messages.filter((message) => !message.error && message.content.trim()).map(({ role, content, imageDataUrls }) => ({ role, content, imageDataUrls }))
+    const id = createId(), controller = new AbortController()
+    const activity: ToolActivityItem = { id: `compact-${id}`, kind: 'compact', label: 'Preparando compactação manual', status: 'running' }
+    rt.appendMessage(chatId, { id, role: 'assistant', content: '', streaming: true, agentName: 'Compactação de contexto', modelLabel: ROUTER_MODEL, toolActivity: [activity] })
+    rt.setStreaming(chatId, true); rt.setController(chatId, controller)
+    try {
+      const status = await window.api.localFeatures.status(userId)
+      const countKey = defaultProvider === 'claude' ? await fetchApiKey(userId, 'claude') : null
+      const result = await prepareContext({ userId, chatId, messages: turns, prompt: systemPrompt ?? '', settings: status.settings.compaction, signal: controller.signal, force: true, isCurrentUser: () => useAuthStore.getState().user?.id === userId,
+        countTokens: countKey && defaultModel ? (messages, prompt) => countClaudeContext({ apiKey: countKey, model: defaultModel!, messages, prompt, signal: controller.signal }) : undefined,
+        authorizeRouter: () => authorizeCompactionRouter(userId), onProgress: (label) => { activity.label = label; rt.updateMessage(chatId, id, { toolActivity: [{ ...activity }] }) } })
+      activity.status = 'done'; activity.label = result.changed ? 'Contexto compactado · histórico original preservado' : result.warning ?? 'Contexto já compactado'
+      if (result.changed && result.snapshot) activity.compaction = { beforeTokens: result.snapshot.beforeTokens, afterTokens: result.snapshot.afterTokens, coveredCount: result.snapshot.coveredCount, model: result.snapshot.model, summary: result.snapshot.summary }
+    } catch (error) { activity.status = 'error'; activity.label = controller.signal.aborted || (error as Error).name === 'AbortError' ? 'Compactação cancelada · histórico preservado' : (error as Error).message }
+    finally {
+      rt.updateMessage(chatId, id, { streaming: false, toolActivity: [{ ...activity }] }); rt.setStreaming(chatId, false); rt.setController(chatId, null)
+      if (useAuthStore.getState().user?.id === userId) await persistMessage(chatId, { role: 'assistant', content: '', tokensInput: null, tokensOutput: null, responseMs: null, toolActivity: [activity] })
+    }
+  }
+
   function resetSession(): void {
     setCurrentChatId(null)
     setDraftMessages([])
@@ -412,9 +473,9 @@ export function HomeScreen(): JSX.Element {
           tokensInput: row.tokensInput ?? undefined,
           tokensOutput: row.tokensOutput ?? undefined,
           elapsedMs: row.responseMs ?? undefined,
-          agentName: row.role === 'assistant' ? (meta?.agentName ?? undefined) : undefined,
+          agentName: row.role === 'assistant' ? (!row.content && row.toolActivity?.some((item) => item.kind === 'compact') ? 'Compactação de contexto' : meta?.agentName ?? undefined) : undefined,
           providerLabel: row.role === 'assistant' ? providerName : undefined,
-          modelLabel: row.role === 'assistant' ? (meta?.model ?? undefined) : undefined,
+          modelLabel: row.role === 'assistant' ? (!row.content && row.toolActivity?.some((item) => item.kind === 'compact') ? ROUTER_MODEL : meta?.model ?? undefined) : undefined,
           toolActivity: row.toolActivity ?? undefined,
           thinkingText: row.thinking?.text || undefined,
           thinkingMs: row.thinking?.ms ?? undefined
@@ -429,18 +490,21 @@ export function HomeScreen(): JSX.Element {
     )
   }
 
-  function handleFilesSelected(fileList: FileList | null): void {
+  function handleFilesSelected(fileList: FileList | File[] | null): void {
     if (!fileList || fileList.length === 0) return
 
+    let imageCount = attachments.filter((attachment) => isImageFile({ name: attachment.name, type: attachment.imageDataUrl?.split(';')[0].slice(5) ?? '' })).length
     Array.from(fileList).forEach((file) => {
+      const image = file.type.startsWith('image/') || isImageFile(file)
+      if (image && imageCount++ >= MAX_IMAGE_ATTACHMENTS) { setAttachmentNotice(`Anexe até ${MAX_IMAGE_ATTACHMENTS} imagens por mensagem. Remova uma prévia para adicionar outra.`); return }
       const id = createId()
       setAttachments((prev) => [
         ...prev,
         { id, name: file.name, size: file.size, status: 'reading' }
       ])
 
-      extractTextFromFile(file)
-        .then((content) => updateAttachment(id, { status: 'ready', content }))
+      const extraction = image ? readImageAttachment(file) : extractTextFromFile(file)
+      extraction.then((content) => updateAttachment(id, image ? { status: 'ready', imageDataUrl: content } : { status: 'ready', content }))
         .catch((error: Error) => updateAttachment(id, { status: 'error', error: error.message }))
     })
 
@@ -448,6 +512,7 @@ export function HomeScreen(): JSX.Element {
   }
 
   function removeAttachment(id: string): void {
+    setAttachmentNotice(null)
     setAttachments((prev) => prev.filter((attachment) => attachment.id !== id))
   }
 
@@ -466,6 +531,7 @@ export function HomeScreen(): JSX.Element {
   async function handleSend(overrideText?: string): Promise<void> {
     const sapRequested = useSapForMessage
     const rawText = (overrideText ?? input).trim()
+    if (/^\/compact$/i.test(rawText)) { if (!overrideText) setInput(''); await handleCompact(); return }
     const readyAttachments = attachments.filter((attachment) => attachment.status === 'ready')
     if ((!rawText && readyAttachments.length === 0 && !selectedFolderId) || isStreaming) return
     if (attachments.some((attachment) => attachment.status === 'reading')) return
@@ -541,27 +607,29 @@ export function HomeScreen(): JSX.Element {
       text,
       readyAttachments.map((attachment) => ({
         name: attachment.name,
-        content: attachment.content ?? ''
+        content: attachment.imageDataUrl ? '[Imagem anexada para análise visual.]' : attachment.content ?? ''
       }))
     )
     const selectedClient = clients.find((item) => item.id === currentClientId)
     const workbookContext = selectedClient?.workbookMd?.trim() || ''
     const routingContent = `${fullContent.slice(0, 4000)}${folderReference ? `\n\n${folderReference.content.slice(0, 4000)}` : ''}${workbookContext ? `\n\n${workbookContext}` : ''}`
 
-    const history: ChatTurn[] = messages
-      .filter((message) => !message.error)
-      .map((message) => ({ role: message.role, content: message.content }))
+    let history: ChatTurn[] = messages
+      .filter((message) => !message.error && message.content.trim())
+      .map((message) => ({ role: message.role, content: message.content, imageDataUrls: message.imageDataUrls }))
     history.push({ role: 'user', content: folderReference
       ? `${fullContent}\n\n<contexto-drive>\n${folderReference.content}\n</contexto-drive>`
-      : fullContent })
+      : fullContent, imageDataUrls: readyAttachments.flatMap((attachment) => attachment.imageDataUrl ? [attachment.imageDataUrl] : []) })
+    const sourceHistory = [...history]
 
-    const userMessage: UiMessage = { id: createId(), role: 'user', content: fullContent }
+    const userMessage: UiMessage = { id: createId(), role: 'user', content: fullContent, imageDataUrls: readyAttachments.flatMap((attachment) => attachment.imageDataUrl ? [attachment.imageDataUrl] : []) }
     const nextDraftMessages = [...draftMessages, userMessage]
     if (currentChatId) rt.appendMessage(currentChatId, userMessage)
     else setDraftMessages(nextDraftMessages)
     setUseSapForMessage(false)
     if (!overrideText) setInput('')
     setAttachments([])
+    setAttachmentNotice(null)
 
     let chatId = currentChatId
     let agent = activeAgent
@@ -780,7 +848,60 @@ export function HomeScreen(): JSX.Element {
     const startTime = performance.now()
     const specializedAgent = agent?.source === 'default' && ['ef_consultant', 'dtec_consultant', 'effort_estimator', 'code_review', 'performance_analyzer', 'enhancement_finder', 'customizing_consultant'].includes(agent.id)
     let runtimePrompt = specializedAgent ? prompt : `${prompt ?? ''}\n\n${AI_PRESENTATION_CONTRACT}`
+    let compactionAttempted = false
+    let turnInputBudget = compactionSettings.inputBudget
+    async function prepareTurnContext(): Promise<void> {
+      let step: ToolActivityItem | undefined
+      try {
+        const status = await window.api.localFeatures.status(user!.id)
+        turnInputBudget = status.settings.compaction.inputBudget
+        const result = await prepareContext({
+          userId: user!.id, chatId: chatId!,
+          messages: sourceHistory.map((turn, i) => i === sourceHistory.length - 1 && sapImageDataUrl ? { ...turn, imageDataUrl: sapImageDataUrl } : turn),
+          prompt: runtimePrompt ?? '', settings: { ...status.settings.compaction, automatic: status.settings.compaction.automatic && !compactionAttempted },
+          signal: controller.signal, isCurrentUser: () => useAuthStore.getState().user?.id === user!.id,
+          countTokens: defaultProvider === 'claude' ? (messages, prompt) => countClaudeContext({ apiKey: apiKey!, model: defaultModel!, messages, prompt, signal: controller.signal }) : undefined,
+          authorizeRouter: () => authorizeCompactionRouter(user!.id),
+          onProgress: (label) => {
+            compactionAttempted = true
+            step ??= { id: `compact-${toolActivity.length}`, kind: 'compact', status: 'running', label }
+            if (!toolActivity.includes(step)) toolActivity.push(step)
+            step.label = label; pushToolActivity()
+          }
+        })
+        history = result.messages; iterationHistory = history
+        if (step) {
+          step.status = result.warning ? 'error' : 'done'
+          step.label = result.warning ?? (result.changed ? 'Contexto compactado · histórico original preservado' : 'Contexto preservado')
+          if (result.changed && result.snapshot) step.compaction = { beforeTokens: result.snapshot.beforeTokens, afterTokens: result.snapshot.afterTokens, coveredCount: result.snapshot.coveredCount, model: result.snapshot.model, summary: result.snapshot.summary }
+          pushToolActivity()
+        } else if (result.warning) {
+          toolActivity.push({ id: `compact-warning-${toolActivity.length}`, kind: 'compact', status: 'error', label: result.warning }); pushToolActivity()
+        }
+      } catch (error) {
+        if (step) { step.status = 'error'; step.label = (error as Error).name === 'AbortError' ? 'Compactação cancelada · histórico preservado' : (error as Error).message; pushToolActivity() }
+        throw error
+      }
+    }
     let preparedEfTemplate: PreparedEfTemplate | undefined
+    if (agent?.source === 'default' && agent.id === 'enhancement_finder' && user?.id) {
+      const step: ToolActivityItem = { id: 'local-enhancements', label: 'Consultando catálogo SAP local', kind: 'local', status: 'running' }
+      toolActivity.push(step); pushToolActivity()
+      const cancel = (): void => { void window.api.localFeatures.cancel(user.id) }
+      controller.signal.addEventListener('abort', cancel, { once: true })
+      try {
+        const result = await window.api.localFeatures.search(user.id, fullContent.slice(0, 4000))
+        controller.signal.throwIfAborted()
+        const evidence = localSearchEvidence(result)
+        step.localSearch = { query: result.query ?? fullContent.slice(0, 4000), result }
+        if (evidence) runtimePrompt = `${runtimePrompt ?? ''}\n\n---\n\n${evidence}`
+        step.label = result.mode === 'disabled' ? 'Busca local desativada' : `Catálogo SAP local · ${result.results.length} candidatos · ${result.mode === 'hybrid' ? 'busca híbrida' : 'palavras-chave'}`
+        step.status = result.warning ? 'error' : 'done'
+      } catch (error) {
+        step.status = 'error'; step.label = `Busca local indisponível: ${(error as Error).message}`
+        runtimePrompt = `${runtimePrompt ?? ''}\n\nBusca local indisponível; não afirme ter consultado a base: ${(error as Error).message}`
+      } finally { controller.signal.removeEventListener('abort', cancel); pushToolActivity() }
+    }
     if (agent?.source === 'default' && agent.id === 'customizing_consultant') {
       runtimePrompt = `${runtimePrompt ?? ''}\n\n---\n\n${CUSTOMIZING_OUTPUT_CONTRACT}`
     }
@@ -876,6 +997,7 @@ export function HomeScreen(): JSX.Element {
         if (preparedEfTemplate.snapshot) runtimePrompt = `${runtimePrompt ?? ''}\n\n${efTemplatePrompt(preparedEfTemplate.snapshot, preparedEfTemplate.label)}`
       }
       if (sapRequested && user?.id && sapCapture && sapImageDataUrl && sapControlMode !== 'off') {
+        await prepareTurnContext()
         try {
           if (typeof window.api.sapGui.control !== 'function' || typeof window.api.sapGui.controlStatus !== 'function') {
             throw new Error('O controle SAP foi atualizado, mas esta janela ainda usa a ponte antiga. Feche e abra o Abapfy para carregar a nova versão.')
@@ -915,6 +1037,7 @@ export function HomeScreen(): JSX.Element {
       if (agent) {
         const mcpServers = configsForAgent(agent.source, agent.id)
         if (mcpServers.length > 0) {
+          await prepareTurnContext()
           try {
             const mcpEvidence = await runMcpToolLoop({
               provider: defaultProvider,
@@ -940,12 +1063,19 @@ export function HomeScreen(): JSX.Element {
         }
       }
 
+      await prepareTurnContext()
       if (sapImageDataUrl && iterationHistory.length > 0) {
         const last = iterationHistory[iterationHistory.length - 1]
         iterationHistory = [...iterationHistory.slice(0, -1), { ...last, imageDataUrl: sapImageDataUrl }]
       }
 
       while (!finished && iteration < MAX_CONTINUATIONS) {
+        if (iteration > 0) {
+          const estimated = contextTokens(iterationHistory, runtimePrompt ?? '')
+          const measured = defaultProvider === 'claude' && estimated >= turnInputBudget * .5
+            ? await countClaudeContext({ apiKey, model: defaultModel, messages: iterationHistory, prompt: runtimePrompt ?? '', signal: controller.signal }) : null
+          if ((measured ?? estimated) > turnInputBudget) throw new Error('A continuação excede o orçamento de contexto configurado. A resposta parcial foi preservada; ajuste Features ou continue em outra solicitação.')
+        }
         iteration += 1
         if (iteration > 1) {
           rt.updateMessage(chatId, assistantId, { continuing: iteration - 1 })
@@ -1101,6 +1231,7 @@ export function HomeScreen(): JSX.Element {
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
     if (event.nativeEvent.isComposing) return
+    if (event.key === 'Enter' && !event.shiftKey && /^\/compact$/i.test(input.trim())) { event.preventDefault(); void handleSend(); return }
     if (promptOptions.length > 0 && !shortcutsDismissed) {
       if (event.key === 'Escape') { event.preventDefault(); setShortcutsDismissed(true); return }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -1294,6 +1425,7 @@ export function HomeScreen(): JSX.Element {
                     }`}
                     title={attachment.status === 'error' ? attachment.error : attachment.name}
                   >
+                    {attachment.imageDataUrl && <img className="home-attachment-preview" src={attachment.imageDataUrl} alt={`Prévia de ${attachment.name}`} />}
                     {attachment.status === 'reading' ? (
                       <Loader2 size={11} strokeWidth={2} className="home-attachment-spin" />
                     ) : attachment.status === 'error' ? (
@@ -1323,53 +1455,7 @@ export function HomeScreen(): JSX.Element {
             {promptTrigger && !shortcutsDismissed && <div className="ai-command-menu" id="composer-shortcuts" role="listbox" aria-label={promptTrigger[1] === '/' ? 'Comandos de prompt' : 'Pastas do contexto'}>
               {promptOptions.length ? promptOptions.map((option, index) => <button type="button" role="option" id={`composer-shortcut-${index}`} aria-selected={index === Math.min(shortcutIndex, promptOptions.length - 1)} key={option.folderId ?? option.label} onClick={() => applyPromptOption(index)}><strong>{option.label}</strong><span>{option.detail}</span></button>) : <p className="ai-empty">{promptTrigger[1] === '@' ? 'Nenhuma pasta disponível para este módulo.' : 'Nenhum comando encontrado.'}</p>}
             </div>}
-            <textarea
-              ref={composerInputRef}
-              className="home-composer-input"
-              placeholder="Pergunte alguma coisa sobre SAP/ABAP…"
-              rows={2}
-              value={input}
-              aria-label="Mensagem para o agente"
-              aria-controls={promptOptions.length ? 'composer-shortcuts' : undefined}
-              aria-activedescendant={promptOptions.length ? `composer-shortcut-${Math.min(shortcutIndex, promptOptions.length - 1)}` : undefined}
-              onChange={(event) => { setInput(event.target.value); setShortcutsDismissed(false); setShortcutIndex(0) }}
-              onKeyDown={handleKeyDown}
-            />
-              <div className="home-composer-toolbar">
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="home-file-input-hidden"
-                accept=".txt,.md,.markdown,.json,.yaml,.yml,.xml,.csv,.log,.pdf,.docx,.abap,.cds,.dcl,.sql,.js,.jsx,.ts,.tsx,.py,.java,.cs,.c,.cpp,.h,.go,.rb,.php,.sh,.ps1,.html,.css,.scss"
-                onChange={(event) => handleFilesSelected(event.target.files)}
-              />
-              <div className="home-agent-select home-attachment-select" ref={attachmentMenuRef}>
-                <button type="button" className="home-composer-icon-btn" title="Anexar arquivo ou usar pasta do drive" onClick={() => { setAttachmentMenuOpen((open) => !open); setFolderPickerOpen(false) }}>
-                  <Paperclip size={16} strokeWidth={1.75} />
-                </button>
-                {attachmentMenuOpen && (
-                  <div className="home-agent-menu home-attachment-menu">
-                    <button type="button" className="home-agent-menu-item" onClick={() => { setAttachmentMenuOpen(false); fileInputRef.current?.click() }}><FileText size={15} /><span>Enviar arquivo local</span></button>
-                    <button type="button" className="home-agent-menu-item" disabled={!currentModuleId} onClick={() => { setAttachmentMenuOpen(false); setFolderPickerOpen(true) }}><FolderOpen size={15} /><span>Selecionar pasta do drive</span></button>
-                  </div>
-                )}
-                {folderPickerOpen && (
-                  <div className="home-agent-menu home-drive-folder-menu">
-                    <div className="home-drive-folder-heading"><strong>{selectedClient?.name} / {selectedModule?.name}</strong><button type="button" onClick={() => setFolderPickerOpen(false)} aria-label="Fechar seleção de pasta"><X size={14} /></button></div>
-                    {folderLoadError && <span className="home-client-empty">{folderLoadError}</span>}
-                    {driveFolders.map((folder) => {
-                      const workers = presence.filter((item) => item.clientId === currentClientId && item.moduleId === currentModuleId && item.folderId === folder.id)
-                      const label = presenceLabel(workers, user?.id ?? null)
-                      return <button key={folder.id} type="button" className={`home-agent-menu-item ${folder.id === selectedFolderId ? 'home-agent-menu-item-active' : ''}`} onClick={() => void selectDriveFolder(folder.id)}><FolderOpen size={14} /><span>{folderPath(folder.id, driveFolders)}</span>{label && <small>{label}</small>}</button>
-                    })}
-                    {driveFolders.length === 0 && !folderLoadError && <span className="home-client-empty">Nenhuma subpasta neste módulo.</span>}
-                    {selectedFolderId && <button type="button" className="home-agent-menu-item" onClick={() => void selectDriveFolder(null)}>Remover pasta selecionada</button>}
-                    {presenceError && <span className="home-client-empty">Status de trabalho indisponível.</span>}
-                  </div>
-                )}
-              </div>
-
+            <div className="home-composer-context-row">
               <div className="home-agent-select" ref={agentMenuRef}>
                 <button
                   type="button"
@@ -1443,6 +1529,65 @@ export function HomeScreen(): JSX.Element {
                 )}
               </div>
 
+                          </div>
+            {attachmentNotice && <p className="home-folder-notice" role="alert">{attachmentNotice}</p>}
+            <textarea
+              ref={composerInputRef}
+              className="home-composer-input"
+              placeholder="Pergunte alguma coisa sobre SAP/ABAP…"
+              rows={1}
+              title="Enter envia · Shift+Enter quebra linha"
+              value={input}
+              aria-label="Mensagem para o agente"
+              aria-controls={promptOptions.length ? 'composer-shortcuts' : undefined}
+              aria-activedescendant={promptOptions.length ? `composer-shortcut-${Math.min(shortcutIndex, promptOptions.length - 1)}` : undefined}
+              onChange={(event) => { setInput(event.target.value); setShortcutsDismissed(false); setShortcutIndex(0) }}
+              onPaste={(event) => {
+                const images = clipboardImages(event.clipboardData)
+                if (!images.length) return
+                event.preventDefault()
+                handleFilesSelected(images)
+                const text = event.clipboardData.getData('text/plain')
+                if (text) { const start = event.currentTarget.selectionStart; const end = event.currentTarget.selectionEnd; setInput((value) => value.slice(0, start) + text + value.slice(end)) }
+              }}
+              onKeyDown={handleKeyDown}
+            />
+              <div className="home-composer-toolbar">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="home-file-input-hidden"
+                accept=".png,.jpg,.jpeg,.webp,.txt,.md,.markdown,.json,.yaml,.yml,.xml,.csv,.log,.pdf,.docx,.abap,.cds,.dcl,.sql,.js,.jsx,.ts,.tsx,.py,.java,.cs,.c,.cpp,.h,.go,.rb,.php,.sh,.ps1,.html,.css,.scss"
+                onChange={(event) => handleFilesSelected(event.target.files)}
+              />
+              <div className="home-agent-select home-attachment-select" ref={attachmentMenuRef}>
+                <button type="button" className="home-composer-icon-btn" title="Anexar arquivo ou usar pasta do drive" onClick={() => { setAttachmentMenuOpen((open) => !open); setFolderPickerOpen(false) }}>
+                  <Paperclip size={16} strokeWidth={1.75} />
+                </button>
+                {attachmentMenuOpen && (
+                  <div className="home-agent-menu home-attachment-menu">
+                    <button type="button" className="home-agent-menu-item" onClick={() => { setAttachmentMenuOpen(false); fileInputRef.current?.click() }}><FileText size={15} /><span>Enviar arquivo local</span></button>
+                    <button type="button" className="home-agent-menu-item" disabled={!currentModuleId} onClick={() => { setAttachmentMenuOpen(false); setFolderPickerOpen(true) }}><FolderOpen size={15} /><span>Selecionar pasta do drive</span></button>
+                  </div>
+                )}
+                {folderPickerOpen && (
+                  <div className="home-agent-menu home-drive-folder-menu">
+                    <div className="home-drive-folder-heading"><strong>{selectedClient?.name} / {selectedModule?.name}</strong><button type="button" onClick={() => setFolderPickerOpen(false)} aria-label="Fechar seleção de pasta"><X size={14} /></button></div>
+                    {folderLoadError && <span className="home-client-empty">{folderLoadError}</span>}
+                    {driveFolders.map((folder) => {
+                      const workers = presence.filter((item) => item.clientId === currentClientId && item.moduleId === currentModuleId && item.folderId === folder.id)
+                      const label = presenceLabel(workers, user?.id ?? null)
+                      return <button key={folder.id} type="button" className={`home-agent-menu-item ${folder.id === selectedFolderId ? 'home-agent-menu-item-active' : ''}`} onClick={() => void selectDriveFolder(folder.id)}><FolderOpen size={14} /><span>{folderPath(folder.id, driveFolders)}</span>{label && <small>{label}</small>}</button>
+                    })}
+                    {driveFolders.length === 0 && !folderLoadError && <span className="home-client-empty">Nenhuma subpasta neste módulo.</span>}
+                    {selectedFolderId && <button type="button" className="home-agent-menu-item" onClick={() => void selectDriveFolder(null)}>Remover pasta selecionada</button>}
+                    {presenceError && <span className="home-client-empty">Status de trabalho indisponível.</span>}
+                  </div>
+                )}
+              </div>
+
+              <ContextMeter used={contextUsed} settings={compactionSettings} phase={contextState?.phase ?? 'idle'} detail={contextState?.detail ?? ''} error={contextState?.error} covered={contextState?.snapshot?.coveredCount ?? 0} disabled={!currentChatId || isStreaming} onCompact={() => void handleCompact()} />
               <div className="home-composer-spacer" />
 
               <button
@@ -1464,6 +1609,7 @@ export function HomeScreen(): JSX.Element {
                   ref={modelTriggerRef}
                   type="button"
                   className={`home-model-trigger ${supportsSelectedEffort && claudeEffort === 'max' ? 'home-model-trigger-max' : ''}`}
+                  title={selectedModelDef ? `${selectedModelDef.label}${supportsSelectedEffort ? ` · ${CLAUDE_EFFORT_LABELS_PT[claudeEffort]}` : ''}` : 'Selecionar modelo'}
                   aria-haspopup="dialog"
                   aria-expanded={modelMenuOpen}
                   onClick={() => setModelMenuOpen((open) => !open)}
@@ -1557,9 +1703,7 @@ export function HomeScreen(): JSX.Element {
                 )}
               </div>
 
-              <button type="button" className="home-composer-icon-btn" title="Voz (em breve)" aria-label="Voz indisponível" disabled>
-                <Mic size={16} strokeWidth={1.75} />
-              </button>
+              <WindowsDictationButton disabled={isStreaming} focusInput={() => composerInputRef.current?.focus()} />
 
               {isStreaming ? (
                 <button
@@ -1586,7 +1730,6 @@ export function HomeScreen(): JSX.Element {
                 </button>
               )}
             </div>
-            <div className="ai-composer-hint"><span>/ comandos</span><span>@ pasta do drive</span><span>Enter envia · Shift+Enter quebra linha</span></div>
           </div>
         </div>
       )}
