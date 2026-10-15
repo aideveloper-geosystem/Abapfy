@@ -99,6 +99,7 @@ function mapClienteRow(row: Record<string, unknown>): ClienteParametro {
 }
 
 interface EstimativaParametrosState {
+  error: string | null
   loaded: boolean
   loading: boolean
   estimativas: EstimativaParametro[]
@@ -122,6 +123,7 @@ function currentUserId(): string | null {
 }
 
 export const useEstimativaParametrosStore = create<EstimativaParametrosState>((set) => ({
+  error: null,
   loaded: false,
   loading: false,
   estimativas: [],
@@ -131,9 +133,9 @@ export const useEstimativaParametrosStore = create<EstimativaParametrosState>((s
     const userId = currentUserId()
     if (!userId) return
 
-    set({ loading: true })
+    set({ loading: true, error: null })
 
-    const [{ data: estimativaRows }, { data: clienteRows }] = await Promise.all([
+    const [{ data: estimativaRows }, { data: clienteRows, error: clienteError }] = await Promise.all([
       supabase
         .from('estimativa_parametros')
         .select('*')
@@ -141,12 +143,13 @@ export const useEstimativaParametrosStore = create<EstimativaParametrosState>((s
         .order('tipo')
         .order('objeto')
         .order('complexidade'),
-      supabase.from('cliente_parametros').select('*').eq('user_id', userId).order('empresa')
+      supabase.from('cliente_parametros_compartilhados').select('*').order('empresa')
     ])
 
     set({
       loaded: true,
       loading: false,
+      error: clienteError ? 'Não foi possível carregar os parâmetros compartilhados. Confira a conexão e a migration 036.' : null,
       estimativas: (estimativaRows ?? []).map(mapEstimativaRow),
       clientes: (clienteRows ?? []).map(mapClienteRow)
     })
@@ -193,12 +196,12 @@ export const useEstimativaParametrosStore = create<EstimativaParametrosState>((s
   },
 
   upsertCliente: async (param) => {
+    if (!['ADMIN', 'MASTER'].includes(useAuthStore.getState().role ?? '')) { set({ error: 'Somente administradores e master podem modificar parâmetros de cliente.' }); return }
     const userId = currentUserId()
     if (!userId) return
 
     const payload: Record<string, unknown> = {
       id: param.id,
-      user_id: userId,
       empresa: param.empresa
     }
     const keyMap: Record<(typeof CLIENTE_COLUMNS)[number], keyof ClienteParametro> = {
@@ -228,13 +231,13 @@ export const useEstimativaParametrosStore = create<EstimativaParametrosState>((s
     }
 
     const { data, error } = await supabase
-      .from('cliente_parametros')
-      .upsert(payload, { onConflict: param.id ? 'id' : 'user_id,empresa' })
+      .from('cliente_parametros_compartilhados')
+      .upsert(payload, { onConflict: param.id ? 'id' : 'empresa' })
       .select('*')
       .single()
 
-    if (error || !data) return
-
+    if (error || !data) { set({ error: error?.message ?? 'Não foi possível salvar o parâmetro.' }); return }
+    set({ error: null })
     const saved = mapClienteRow(data)
     set((state) => ({
       clientes: state.clientes.some((item) => item.id === saved.id)
@@ -244,14 +247,17 @@ export const useEstimativaParametrosStore = create<EstimativaParametrosState>((s
   },
 
   deleteCliente: async (id) => {
+    if (!['ADMIN', 'MASTER'].includes(useAuthStore.getState().role ?? '')) { set({ error: 'Somente administradores e master podem modificar parâmetros de cliente.' }); return }
     const userId = currentUserId()
     if (!userId) return
 
-    await supabase.from('cliente_parametros').delete().eq('id', id).eq('user_id', userId)
+    const { error } = await supabase.from('cliente_parametros_compartilhados').delete().eq('id', id)
+    if (error) { set({ error: error.message }); return }
+    set({ error: null })
     set((state) => ({ clientes: state.clientes.filter((item) => item.id !== id) }))
   },
 
-  reset: () => set({ loaded: false, loading: false, estimativas: [], clientes: [] })
+  reset: () => set({ error: null, loaded: false, loading: false, estimativas: [], clientes: [] })
 }))
 
 /**
@@ -270,7 +276,7 @@ export async function fetchParametrosContextBlock(userId: string): Promise<strin
       .order('tipo')
       .order('objeto')
       .order('complexidade'),
-    supabase.from('cliente_parametros').select('*').eq('user_id', userId).order('empresa')
+    supabase.from('cliente_parametros_compartilhados').select('*').order('empresa')
   ])
   const estimativaRows = estimativaResult.data
   const clienteRows = clienteResult.data

@@ -39,6 +39,9 @@ import { SkillsScreen } from '@renderer/screens/SkillsScreen'
 import { AgentsScreen } from '@renderer/screens/AgentsScreen'
 import { ProjectsScreen } from '@renderer/screens/ProjectsScreen'
 import { ClientsScreen } from '@renderer/screens/ClientsScreen'
+import { extractAbapArtifacts, saveAbapArtifacts } from '@renderer/lib/abapDrive'
+import { useTasksStore, type TaskItem, type TaskSubtask } from '@renderer/store/tasksStore'
+import { buildTaskExecutionPrompt } from '@renderer/lib/taskAssistant'
 import { TasksScreen } from '@renderer/screens/TasksScreen'
 import { SessionContextPanel } from '@renderer/components/SessionContextPanel'
 import { AiLoadingState } from '@renderer/components/AiMessageActions'
@@ -123,9 +126,13 @@ interface ActiveAgent {
   name: string
 }
 
+interface TaskLaunch { id: string; userId: string; taskId: string; subtaskId: string | null; prompt: string }
+
 type View = 'chat' | 'skills' | 'agents' | 'projects' | 'clients' | 'tasks' | 'news'
 
 export function HomeScreen(): JSX.Element {
+  const [taskLaunch, setTaskLaunch] = useState<TaskLaunch | null>(null)
+  const consumedTaskLaunch = useRef<string | null>(null)
   const [view, setView] = useState<View>('chat')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
@@ -244,7 +251,7 @@ export function HomeScreen(): JSX.Element {
   // onClarifyAnswer seria uma função nova a cada render do HomeScreen (o que
   // acontece a cada delta do streaming), derrubando o React.memo de
   // ChatMessageItem pra TODAS as mensagens, não só a que está gerando.
-  const handleSendRef = useRef<(overrideText?: string) => Promise<void>>()
+  const handleSendRef = useRef<(overrideText?: string, launch?: TaskLaunch) => Promise<void>>()
   const handleClarifyAnswer = useCallback((text: string) => {
     void handleSendRef.current?.(text)
   }, [])
@@ -254,6 +261,16 @@ export function HomeScreen(): JSX.Element {
     composerInputRef.current?.focus()
   }, [])
   handleSendRef.current = handleSend
+  useEffect(() => {
+    if (!taskLaunch || consumedTaskLaunch.current === taskLaunch.id) return
+    consumedTaskLaunch.current = taskLaunch.id
+    if (taskLaunch.userId !== user?.id) { setTaskLaunch(null); return }
+    void handleSendRef.current?.(taskLaunch.prompt, taskLaunch).catch((cause: Error) => {
+      setModelChoiceError('Não foi possível iniciar a tarefa: ' + cause.message)
+    }).finally(() => {
+      setTaskLaunch((current) => current?.id === taskLaunch.id ? null : current)
+    })
+  }, [taskLaunch, user?.id])
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent): void {
@@ -374,6 +391,7 @@ export function HomeScreen(): JSX.Element {
   }
 
   function resetSession(): void {
+    setTaskLaunch(null)
     setCurrentChatId(null)
     setDraftMessages([])
     setActiveAgent(null)
@@ -416,6 +434,25 @@ export function HomeScreen(): JSX.Element {
     setCurrentClientId(clientId)
     setCurrentModuleId(moduleId)
     setSelectedFolderId(folderId ?? null)
+  }
+
+  function handleStartTask(task: TaskItem, subtask?: TaskSubtask): void {
+    if (!user || isRouting || taskLaunch) return
+    const saved = useTasksStore.getState().tasks.find((item) => item.id === task.id)
+    if (!saved || (subtask && !saved.subtasks.some((item) => item.id === subtask.id))) return
+    const client = clients.find((item) => item.id === saved.clientId)
+    const module = modules.find((item) => item.id === saved.moduleId && item.clientId === saved.clientId)
+      ?? modules.find((item) => item.clientId === saved.clientId && item.name.toLowerCase() === 'programas')
+      ?? modules.find((item) => item.clientId === saved.clientId)
+    if (!client || !module) { window.alert('Selecione um cliente e uma área do drive na tarefa antes de executar.'); return }
+    if (!defaultProvider || !defaultModel) { window.alert('Configure um modelo de IA antes de executar a tarefa.'); return }
+    resetSession()
+    setView('chat')
+    setCurrentProject(projects.find((item) => item.id === saved.projectId) ?? null)
+    setCurrentClientId(client.id)
+    setCurrentModuleId(module.id)
+    setSelectedFolderId(saved.folderId)
+    setTaskLaunch({ id: createId(), userId: user.id, taskId: saved.id, subtaskId: subtask?.id ?? null, prompt: buildTaskExecutionPrompt(saved, client.name, subtask) })
   }
 
   async function handleSelectChat(chatId: string): Promise<void> {
@@ -528,7 +565,7 @@ export function HomeScreen(): JSX.Element {
     setFolderLoadError(null)
   }
 
-  async function handleSend(overrideText?: string): Promise<void> {
+  async function handleSend(overrideText?: string, launch?: TaskLaunch): Promise<void> {
     const sapRequested = useSapForMessage
     const rawText = (overrideText ?? input).trim()
     if (/^\/compact$/i.test(rawText)) { if (!overrideText) setInput(''); await handleCompact(); return }
@@ -587,10 +624,7 @@ export function HomeScreen(): JSX.Element {
         setFolderNotice(folderReference.limited
           ? `Contexto do drive limitado: ${folderReference.names.length} arquivo(s) encontrado(s); parte do conteúdo foi omitida. Divida a análise em pastas menores para obter a documentação completa.`
           : `${folderReference.names.length} arquivo(s) do drive incluído(s) nesta mensagem.`)
-        if (folderReference.names.length === 0) {
-          pushLocalError('A pasta selecionada não contém arquivos para análise. Escolha outra pasta ou anexe os arquivos.')
-          return
-        }
+
       } catch (cause) {
         pushLocalError(`Não foi possível carregar a pasta do drive: ${(cause as Error).message}`)
         return
@@ -756,6 +790,12 @@ export function HomeScreen(): JSX.Element {
         return
       }
 
+      if (launch) {
+        if (useAuthStore.getState().user?.id !== launch.userId) return
+        const linked = await useTasksStore.getState().linkSession(launch.taskId, launch.subtaskId, newChatId)
+        if (!linked) { pushLocalError('A sessão foi criada, mas não foi possível vinculá-la à tarefa. Confira a migration 037 antes de tentar novamente.'); return }
+        setTaskLaunch((current) => current?.id === launch.id ? null : current)
+      }
       chatId = newChatId
       rt.ensure(chatId, nextDraftMessages)
       setDraftMessages([])
@@ -915,6 +955,8 @@ export function HomeScreen(): JSX.Element {
       const parametrosBlock = await fetchParametrosContextBlock(user.id)
       runtimePrompt = `${runtimePrompt}\n\n---\n\n## Parâmetros atuais desta solicitação\n\n${parametrosBlock}`
     }
+
+    runtimePrompt = (runtimePrompt ?? '') + '\n\n## Arquivos ABAP no drive\nQuando gerar código ABAP, apresente cada arquivo em um bloco de código com linguagem abap. Use o nome real do programa ou classe quando conhecido. O aplicativo salva blocos concluídos no cliente, área e pasta selecionados. Não afirme que o arquivo foi salvo: essa confirmação é emitida pelo aplicativo após o salvamento.'
 
     const refinement = agent?.source === 'default' ? agentRefinementContract(agent.id) : null
     if (refinement) runtimePrompt = `${runtimePrompt ?? ''}\n\n---\n\n${refinement}`
@@ -1181,6 +1223,27 @@ export function HomeScreen(): JSX.Element {
         step.label = completed.state === 'saved' ? `EF salva no drive: ${destinationLabel}` : `Falha ao salvar EF: ${completed.error}`
         pushToolActivity()
       }
+      if (!streamFailed && !controller.signal.aborted && finished) {
+        const artifacts = extractAbapArtifacts(accumulated)
+        if (artifacts.length) {
+          const step: ToolActivityItem = { id: 'abap-output', kind: 'document', status: 'running', label: 'Salvando código ABAP no drive do cliente' }
+          toolActivity.push(step)
+          pushToolActivity()
+          try {
+            const saved: string[] = []
+            await saveAbapArtifacts({ userId: user.id, clientId: currentClientId, moduleId: currentModuleId, folderId: selectedFolderId, chatId, messageId: assistantId }, artifacts, controller.signal, (name) => {
+              saved.push(name)
+              step.label = 'ABAP salvo: ' + saved.join(', ')
+              pushToolActivity()
+            })
+            step.status = 'done'
+          } catch (cause) {
+            step.status = 'error'
+            step.label = 'Falha ao salvar ABAP no drive: ' + (cause as Error).message + '. O código permanece nesta conversa.'
+          }
+          pushToolActivity()
+        }
+      }
       const pendingTemplate = toolActivity.find((item) => item.id === 'ef-template' && item.status === 'running')
       if (pendingTemplate) { pendingTemplate.status = 'error'; pendingTemplate.label = 'Não foi possível preparar o modelo EF'; pushToolActivity() }
       // Cancela qualquer frame pendente e garante que o texto final exibido
@@ -1316,7 +1379,7 @@ export function HomeScreen(): JSX.Element {
       {view === 'agents' && <AgentsScreen />}
       {view === 'projects' && <ProjectsScreen onOpenProject={handleOpenProjectForNewChat} />}
       {view === 'clients' && <ClientsScreen onNewChat={handleClientNewChat} onOpenChat={(id) => void handleSelectChat(id)} workPresence={presence} presenceError={presenceError} onActivityChange={setDriveActivity} />}
-      {view === 'tasks' && <TasksScreen />}
+      {view === 'tasks' && <TasksScreen onStartTask={handleStartTask} onOpenChat={(id) => { void handleSelectChat(id) }} />}
       {view === 'news' && <NewsScreen />}
 
       {view === 'chat' && (

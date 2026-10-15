@@ -5,6 +5,7 @@ import {
   type ClienteParametro,
   type EstimativaParametro
 } from '@renderer/store/estimativaParametrosStore'
+import { useAuthStore } from '@renderer/store/authStore'
 import './ParametrosSection.css'
 
 type Tab = 'clientes' | 'estimativas'
@@ -54,6 +55,7 @@ function ClienteCard({
   onSave: (patch: Partial<ClienteParametro>) => void
   onDelete: () => void
 }): JSX.Element {
+  const canEdit = useAuthStore((s) => s.role === 'ADMIN' || s.role === 'MASTER')
   const [draft, setDraft] = useState(cliente)
 
   useEffect(() => setDraft(cliente), [cliente])
@@ -62,12 +64,13 @@ function ClienteCard({
     <div className="parametros-cliente-card">
       <header className="parametros-cliente-header">
         <input
+          readOnly={!canEdit}
           className="parametros-cliente-name"
           value={draft.empresa}
           onChange={(event) => setDraft({ ...draft, empresa: event.target.value })}
-          onBlur={() => draft.empresa.trim() && onSave({ empresa: draft.empresa.trim() })}
+          onBlur={() => canEdit && draft.empresa.trim() && onSave({ empresa: draft.empresa.trim() })}
         />
-        <button type="button" className="parametros-icon-btn" onClick={onDelete} title="Remover cliente">
+        <button disabled={!canEdit} type="button" className="parametros-icon-btn" onClick={onDelete} title="Remover cliente">
           <Trash2 size={14} strokeWidth={1.75} />
         </button>
       </header>
@@ -76,13 +79,14 @@ function ClienteCard({
           <label key={key} className="parametros-field">
             <span>{label}</span>
             <input
+              readOnly={!canEdit}
               type="number"
               step="0.01"
               value={draft[key]}
               onChange={(event) =>
                 setDraft({ ...draft, [key]: Number(event.target.value) } as ClienteParametro)
               }
-              onBlur={() => onSave({ [key]: draft[key] } as Partial<ClienteParametro>)}
+              onBlur={() => canEdit && onSave({ [key]: draft[key] } as Partial<ClienteParametro>)}
             />
           </label>
         ))}
@@ -92,6 +96,7 @@ function ClienteCard({
 }
 
 function ClientesTab(): JSX.Element {
+  const canEdit = useAuthStore((s) => s.role === 'ADMIN' || s.role === 'MASTER')
   const { clientes, upsertCliente, deleteCliente } = useEstimativaParametrosStore((state) => ({
     clientes: state.clientes,
     upsertCliente: state.upsertCliente,
@@ -121,11 +126,11 @@ function ClientesTab(): JSX.Element {
         <ClienteCard
           key={cliente.id}
           cliente={cliente}
-          onSave={(patch) => upsertCliente({ id: cliente.id, empresa: cliente.empresa, ...patch })}
+          onSave={(patch) => upsertCliente({ ...cliente, ...patch })}
           onDelete={() => deleteCliente(cliente.id)}
         />
       ))}
-      <button type="button" className="parametros-add-btn" onClick={handleAdd}>
+      <button disabled={!canEdit} type="button" className="parametros-add-btn" onClick={handleAdd}>
         <Plus size={14} strokeWidth={2} />
         Adicionar cliente
       </button>
@@ -268,7 +273,8 @@ function EstimativasTab(): JSX.Element {
 
 export function ParametrosSection(): JSX.Element {
   const [tab, setTab] = useState<Tab>('clientes')
-  const { loaded, load } = useEstimativaParametrosStore((state) => ({
+  const { loaded, load, error } = useEstimativaParametrosStore((state) => ({
+    error: state.error,
     loaded: state.loaded,
     load: state.load
   }))
@@ -287,6 +293,7 @@ export function ParametrosSection(): JSX.Element {
         </p>
       </header>
 
+      {error && <p role="alert">{error}</p>}
       <div className="parametros-tabs">
         <button
           type="button"
@@ -304,6 +311,7 @@ export function ParametrosSection(): JSX.Element {
         </button>
       </div>
 
+      {tab === 'clientes' && <p>Parâmetros compartilhados. Somente administradores e master podem editar.</p>}
       {tab === 'clientes' ? <ClientesTab /> : <EstimativasTab />}
     </div>
   )

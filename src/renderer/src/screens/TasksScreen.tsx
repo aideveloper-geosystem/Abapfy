@@ -31,13 +31,21 @@ import {
   type TaskItem,
   type TaskPriority,
   type TaskRecurrence,
+  type TaskSubtask,
   type TaskStatus
 } from '@renderer/store/tasksStore'
+import { useClientsStore } from '@renderer/store/clientsStore'
+import { loadClientFolders, folderPath, type DriveFolder } from '@renderer/lib/clientFolderContext'
 import { useChatStore } from '@renderer/store/chatStore'
 import { useSettingsStore } from '@renderer/store/settingsStore'
 import { useAuthStore } from '@renderer/store/authStore'
 import { suggestTaskDraft } from '@renderer/lib/taskAssistant'
 import './TasksScreen.css'
+
+interface TaskActions {
+  onStartTask: (task: TaskItem, subtask?: TaskSubtask) => void
+  onOpenChat: (chatId: string) => void
+}
 
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
   low: 'Baixa',
@@ -53,6 +61,9 @@ const RECURRENCE_LABELS: Record<TaskRecurrence, string> = {
 
 function emptyForm(status: string): TaskInput {
   return {
+    clientId: '',
+    moduleId: '',
+    folderId: '',
     title: '',
     description: '',
     status,
@@ -93,6 +104,7 @@ function TaskCard({
   columns: TaskColumn[]
   onOpen: () => void
 }): JSX.Element {
+  const clientName = useClientsStore((state) => state.clients.find((client) => client.id === task.clientId)?.name)
   const completed = task.subtasks.filter((item) => item.completed).length
   const overdue = Boolean(
     task.dueDate &&
@@ -131,6 +143,7 @@ function TaskCard({
         </div>
         <GripVertical size={14} strokeWidth={1.5} className="task-card-grip" />
       </div>
+      <div className="task-client-label">{clientName ?? 'Sem cliente'}</div>
       <h3 className="task-card-title">{task.title}</h3>
       {task.description && <p className="task-card-description">{task.description}</p>}
       {task.labels.length > 0 && (
@@ -185,6 +198,8 @@ function TaskModal({
   task,
   initialStatus,
   columns,
+  onStartTask,
+  onOpenChat,
   tasks,
   onClose
 }: {
@@ -193,10 +208,13 @@ function TaskModal({
   columns: TaskColumn[]
   tasks: TaskItem[]
   onClose: () => void
-}): JSX.Element {
+} & TaskActions): JSX.Element {
   const [form, setForm] = useState<TaskInput>(() =>
     task
       ? {
+          clientId: task.clientId ?? '',
+          moduleId: task.moduleId ?? '',
+          folderId: task.folderId ?? '',
           title: task.title,
           description: task.description ?? '',
           status: task.status,
@@ -215,6 +233,15 @@ function TaskModal({
         }
       : emptyForm(initialStatus)
   )
+  const { clients, modules } = useClientsStore()
+  const [folders, setFolders] = useState<DriveFolder[]>([])
+  const [formError, setFormError] = useState<string | null>(null)
+  useEffect(() => {
+    let active = true
+    setFolders([])
+    if (form.moduleId) void loadClientFolders(form.moduleId).then((rows) => { if (active) setFolders(rows) }).catch(() => { if (active) setFormError('Não foi possível carregar as pastas.') })
+    return () => { active = false }
+  }, [form.moduleId])
   const [labelsText, setLabelsText] = useState(form.labels.join(', '))
   const [subtaskTitle, setSubtaskTitle] = useState('')
   const [assistantBrief, setAssistantBrief] = useState('')
@@ -258,12 +285,14 @@ function TaskModal({
       const ok = await updateTask(task.id, normalized)
       setSaving(false)
       if (ok) onClose()
+      else setFormError('Não foi possível salvar a tarefa. Confira a conexão e a migration 037.')
       return
     }
     const created = await createTask(normalized)
     if (created && approvedSuggestions.length) await addSubtasks(created.id, approvedSuggestions)
     setSaving(false)
     if (created) onClose()
+    else setFormError('Não foi possível criar a tarefa. Confira a conexão e a migration 037.')
   }
 
   async function handleAssistant(): Promise<void> {
@@ -300,6 +329,18 @@ function TaskModal({
     } finally {
       setSuggesting(false)
     }
+  }
+
+  async function handleExecute(subtask?: TaskSubtask): Promise<void> {
+    if (!liveTask || saving) return
+    setSaving(true)
+    try {
+      const ok = await updateTask(liveTask.id, { ...form, labels: labelsText.split(',').map((label) => label.trim()).filter(Boolean).slice(0, 12) })
+      if (!ok) { setFormError('Salve um cliente e uma pasta válidos antes de executar.'); return }
+      const saved = useTasksStore.getState().tasks.find((item) => item.id === liveTask.id)
+      if (saved) onStartTask(saved, subtask)
+    } catch (cause) { setFormError((cause as Error).message) }
+    finally { setSaving(false) }
   }
 
   async function handleDelete(): Promise<void> {
@@ -343,7 +384,17 @@ function TaskModal({
             {suggesting ? 'Analisando…' : 'Preencher com IA'}
           </button>
         </div>
+        {formError && <div className="tasks-error" role="alert">{formError}</div>}
         <form className="task-form" onSubmit={handleSubmit}>
+          <div className="task-form-row">
+            <label><span>Cliente</span><select value={form.clientId} onChange={(event) => {
+              const clientId = event.target.value
+              const module = modules.find((m) => m.clientId === clientId && m.name.toLowerCase() === 'programas') ?? modules.find((m) => m.clientId === clientId)
+              setForm({ ...form, clientId, moduleId: module?.id ?? '', folderId: '', projectId: '', chatId: '' })
+            }}><option value="">Sem cliente</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>
+            <label><span>Área do drive</span><select value={form.moduleId} disabled={!form.clientId} onChange={(event) => setForm({ ...form, moduleId: event.target.value, folderId: '' })}><option value="">Selecione</option>{modules.filter((m) => m.clientId === form.clientId).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
+            <label><span>Pasta de trabalho</span><select value={form.folderId} disabled={!form.moduleId} onChange={(event) => setForm({ ...form, folderId: event.target.value })}><option value="">Raiz da área</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folderPath(folder.id, folders)}</option>)}</select></label>
+          </div>
           <label>
             <span>Título</span>
             <input
@@ -475,7 +526,7 @@ function TaskModal({
                 }
               >
                 <option value="">Sem projeto</option>
-                {projects.map((project) => (
+                {projects.filter((project) => !form.clientId || project.clientId === form.clientId).map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.name}
                   </option>
@@ -489,7 +540,7 @@ function TaskModal({
                 onChange={(event) => setForm({ ...form, chatId: event.target.value })}
               >
                 <option value="">Sem chat</option>
-                {chats.map((chat) => (
+                {chats.filter((chat) => !form.clientId || chat.clientId === form.clientId).map((chat) => (
                   <option key={chat.id} value={chat.id}>
                     {chat.title}
                   </option>
@@ -549,6 +600,11 @@ function TaskModal({
         </form>
         {task && liveTask && (
           <div className="task-subtasks">
+            <div className="task-session-actions">
+              <button type="button" className="task-primary-button" disabled={saving} onClick={() => void handleExecute()}><WandSparkles size={14} /> Executar tarefa em nova sessão</button>
+              {liveTask.chatId && <button type="button" className="task-secondary-button" onClick={() => onOpenChat(liveTask.chatId!)}>Abrir sessão da tarefa</button>}
+            </div>
+            <p>O agente recebe o contexto do cliente e da pasta. Revise a entrega antes de marcar como concluída.</p>
             <div className="task-subtasks-header">
               <span>Subtarefas</span>
               <span>
@@ -578,6 +634,8 @@ function TaskModal({
                   >
                     {subtask.title}
                   </span>
+                  {subtask.chatId && <button type="button" className="task-secondary-button" onClick={() => onOpenChat(subtask.chatId!)}>Abrir sessão</button>}
+                  <button type="button" className="task-secondary-button" disabled={subtask.completed || saving} onClick={() => void handleExecute(subtask)} title="Executar somente esta subtarefa em uma nova sessão"><WandSparkles size={13} /> Executar</button>
                   <button
                     type="button"
                     className="task-subtask-delete"
@@ -787,15 +845,17 @@ function CalendarView({
   )
 }
 
-export function TasksScreen(): JSX.Element {
+export function TasksScreen({ onStartTask, onOpenChat }: TaskActions): JSX.Element {
+  const { clients } = useClientsStore()
+  const [clientFilter, setClientFilter] = useState('')
   const { tasks, columns, loaded, loading, error, load, moveTask } = useTasksStore()
   const [modal, setModal] = useState<{ task: TaskItem | null; status: TaskStatus } | null>(null)
   const [columnManager, setColumnManager] = useState(false)
   const [view, setView] = useState<'board' | 'calendar' | 'list'>('board')
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
-  const visibleTasks = useMemo(() => tasks.filter((task) => (!statusFilter || task.status === statusFilter) &&
-    [task.title, task.description, task.sapModule, task.assignee, ...task.labels].some((value) => value?.toLocaleLowerCase('pt-BR').includes(query.trim().toLocaleLowerCase('pt-BR')))), [tasks, query, statusFilter])
+  const visibleTasks = useMemo(() => tasks.filter((task) => (!clientFilter || (clientFilter === 'none' ? !task.clientId : task.clientId === clientFilter)) && (!statusFilter || task.status === statusFilter) &&
+    [task.title, task.description, task.sapModule, task.assignee, clients.find((client) => client.id === task.clientId)?.name, ...task.labels].some((value) => value?.toLocaleLowerCase('pt-BR').includes(query.trim().toLocaleLowerCase('pt-BR')))), [tasks, query, statusFilter, clientFilter, clients])
   const [month, setMonth] = useState(() => new Date())
   useEffect(() => {
     if (!loaded) void load()
@@ -837,7 +897,7 @@ export function TasksScreen(): JSX.Element {
       <header className="tasks-header">
         <div>
           <h1>Gerenciamento de tarefas</h1>
-          <p>Planeje entregas SAP, dependências, esforço e recorrências.</p>
+          <p>Seu quadro pessoal: organize entregas por cliente e execute tarefas com o agente.</p>
         </div>
         <div className="tasks-header-actions">
           <button type="button" className="task-secondary-button" onClick={enableNotifications}>
@@ -871,7 +931,7 @@ export function TasksScreen(): JSX.Element {
           </button>
         </div>
       </header>
-      <div className="tasks-filter-bar"><label><Search size={14} /><input aria-label="Buscar tarefas" placeholder="Buscar tarefa, módulo ou responsável…" value={query} onChange={(event) => setQuery(event.target.value)} /></label><div aria-label="Filtrar tarefas por status"><button type="button" aria-pressed={!statusFilter} onClick={() => setStatusFilter(null)}>Todas <span>{tasks.length}</span></button>{columns.map((column) => <button type="button" key={column.id} aria-pressed={statusFilter === column.key} onClick={() => setStatusFilter(column.key)}>{column.name}<span>{tasks.filter((task) => task.status === column.key).length}</span></button>)}</div></div>
+      <div className="tasks-filter-bar"><select aria-label="Filtrar por cliente" value={clientFilter} onChange={(event) => setClientFilter(event.target.value)}><option value="">Todos os clientes</option><option value="none">Sem cliente</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><label><Search size={14} /><input aria-label="Buscar tarefas" placeholder="Buscar tarefa, módulo ou responsável…" value={query} onChange={(event) => setQuery(event.target.value)} /></label><div aria-label="Filtrar tarefas por status"><button type="button" aria-pressed={!statusFilter} onClick={() => setStatusFilter(null)}>Todas <span>{tasks.length}</span></button>{columns.map((column) => <button type="button" key={column.id} aria-pressed={statusFilter === column.key} onClick={() => setStatusFilter(column.key)}>{column.name}<span>{tasks.filter((task) => task.status === column.key).length}</span></button>)}</div></div>
       <div className="tasks-result-count" role="status">{loading ? 'Carregando tarefas…' : `${visibleTasks.length} de ${tasks.length} tarefas`}</div>
       {error && (
         <div className="tasks-error">
@@ -891,7 +951,7 @@ export function TasksScreen(): JSX.Element {
           </button>
         </div>
       )}
-      {view === 'list' ? <div className="tasks-records"><table><thead><tr><th>Tarefa</th><th>Status</th><th>Módulo</th><th>Responsável</th><th>Prazo</th><th>Subtarefas</th></tr></thead><tbody>{visibleTasks.map((task) => <tr key={task.id}><td><button type="button" onClick={() => setModal({ task, status: task.status })}>{task.title}</button></td><td>{columns.find((column) => column.key === task.status)?.name ?? 'Status indisponível'}</td><td>{task.sapModule || '—'}</td><td>{task.assignee || '—'}</td><td>{task.dueDate ? new Date(`${task.dueDate}T12:00:00`).toLocaleDateString('pt-BR') : 'Sem prazo'}</td><td>{task.subtasks.filter((item) => item.completed).length}/{task.subtasks.length}</td></tr>)}</tbody></table>{!visibleTasks.length && !loading && <p>Nenhuma tarefa corresponde aos filtros.</p>}</div> : view === 'calendar' ? (
+      {view === 'list' ? <div className="tasks-records"><table><thead><tr><th>Tarefa</th><th>Cliente</th><th>Status</th><th>Módulo</th><th>Responsável</th><th>Prazo</th><th>Subtarefas</th></tr></thead><tbody>{visibleTasks.map((task) => <tr key={task.id}><td><button type="button" onClick={() => setModal({ task, status: task.status })}>{task.title}</button></td><td>{clients.find((client) => client.id === task.clientId)?.name ?? 'Sem cliente'}</td><td>{columns.find((column) => column.key === task.status)?.name ?? 'Status indisponível'}</td><td>{task.sapModule || '—'}</td><td>{task.assignee || '—'}</td><td>{task.dueDate ? new Date(`${task.dueDate}T12:00:00`).toLocaleDateString('pt-BR') : 'Sem prazo'}</td><td>{task.subtasks.filter((item) => item.completed).length}/{task.subtasks.length}</td></tr>)}</tbody></table>{!visibleTasks.length && !loading && <p>Nenhuma tarefa corresponde aos filtros.</p>}</div> : view === 'calendar' ? (
         <CalendarView
           tasks={visibleTasks}
           columns={columns}
@@ -954,6 +1014,8 @@ export function TasksScreen(): JSX.Element {
       {modal && (
         <TaskModal
           task={modal.task}
+          onStartTask={onStartTask}
+          onOpenChat={onOpenChat}
           initialStatus={modal.status}
           columns={columns}
           tasks={tasks}

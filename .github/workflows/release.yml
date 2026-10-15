@@ -50,7 +50,7 @@ jobs:
         run: pnpm lint
 
       - name: Test application behavior
-        run: node --test tests/ai-presentation.test.mjs tests/agent-refinements.test.mjs tests/clients-store.test.mjs tests/customizing-response.test.mjs tests/ef-drive.test.mjs tests/sap-control.test.mjs tests/haiku-router.test.mjs tests/catalog-bundle.test.mjs tests/local-features.test.mjs tests/context-compaction.test.mjs tests/local-search-ui.test.mjs tests/image-attachments.test.mjs
+        run: node --test tests/abap-drive.test.mjs tests/task-sessions.test.mjs tests/ai-presentation.test.mjs tests/agent-refinements.test.mjs tests/clients-store.test.mjs tests/customizing-response.test.mjs tests/ef-drive.test.mjs tests/sap-control.test.mjs tests/haiku-router.test.mjs tests/catalog-bundle.test.mjs tests/local-features.test.mjs tests/context-compaction.test.mjs tests/local-search-ui.test.mjs tests/image-attachments.test.mjs
 
       - name: Fetch administrator-published SAP catalog
         if: matrix.artifact == 'windows'

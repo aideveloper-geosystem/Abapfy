@@ -1,6 +1,6 @@
 import { fetchApiKey, streamChat } from '@renderer/lib/aiClient'
 import type { AiProviderId } from '@renderer/lib/aiProviders'
-import type { TaskPriority } from '@renderer/store/tasksStore'
+import type { TaskItem, TaskSubtask, TaskPriority } from '@renderer/store/tasksStore'
 
 export interface SuggestedTaskDraft {
   title: string
@@ -58,4 +58,20 @@ export async function suggestTaskDraft(input: {
     }
   })
   return parseSuggestion(content)
+}
+
+export function buildTaskExecutionPrompt(task: TaskItem, clientName: string, subtask?: TaskSubtask): string {
+  return [
+    'Execute o trabalho abaixo nesta sessão. Produza a entrega e explique como validá-la.',
+    'Cliente: ' + clientName,
+    'Tarefa: ' + task.title,
+    task.description ? 'Contexto: ' + task.description : '',
+    task.sapModule ? 'Módulo SAP: ' + task.sapModule : '',
+    task.dueDate ? 'Prazo: ' + task.dueDate : '',
+    task.labels.length ? 'Etiquetas: ' + task.labels.join(', ') : '',
+    subtask ? 'Execute somente esta subtarefa: ' + subtask.title : 'Escopo: tarefa completa.',
+    task.subtasks.length ? 'Checklist de referência:\n' + task.subtasks.map((item) => '- [' + (item.completed ? 'x' : ' ') + '] ' + item.title).join('\n') : '',
+    'Use o cliente e a pasta desta sessão para consultar referências e salvar entregas. Apresente códigos ABAP em blocos com linguagem abap, para salvamento automático em .abap.',
+    'Se faltar informação essencial, peça esclarecimento. Não marque a tarefa ou subtarefa como concluída automaticamente. O acesso ao SAP depende da autorização explícita do usuário nesta sessão.'
+  ].filter(Boolean).join('\n\n')
 }

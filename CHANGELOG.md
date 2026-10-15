@@ -6,6 +6,31 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-10-15
+
+### Controle SAP
+
+- Recuperação de foco da janela SAP com nova tentativa de ativação e conexão temporária das filas de entrada do Windows, mantendo a conferência de processo, captura, geometria e foco antes de enviar entrada.
+- Removida a espera fixa por caractere para reduzir a latência de digitação; ações com resultado incerto continuam sem repetição automática.
+
+### Clientes e arquivos ABAP
+
+- Parâmetros de produtividade de cliente compartilhados: ADMIN e MASTER editam; usuários comuns consultam, com restrição na interface e no banco.
+- Códigos ABAP concluídos no chat são salvos automaticamente em arquivos .abap no cliente, área e pasta da sessão, preservando arquivos existentes e apresentando falhas no chat.
+- Pastas vazias podem receber novas entregas e a edição de um fator preserva os demais valores do cliente.
+
+### Tarefas pessoais
+
+- Kanban com cliente, área e pasta do drive, identificação do cliente nos cards e filtro por cliente.
+- Tarefas e subtarefas podem iniciar novas sessões do agente com contexto e checklist; a sessão fica vinculada para reabertura. A conclusão permanece manual.
+- Preservado o isolamento das tarefas por usuário, inclusive para administradores.
+
+### Banco de dados e validação
+
+- Aplicar as migrations 036_shared_client_parameters.sql e 037_personal_task_sessions.sql, nesta ordem. A migration 037 inclui a correção dos delimitadores das funções PL/pgSQL.
+- A migration 036 mantém as cópias antigas dos parâmetros; em caso de divergência, prioriza MASTER, ADMIN e depois a atualização mais recente. Revise os valores compartilhados após a migração.
+- A atualização desktop não aplica migrations automaticamente. Os fluxos autenticados de banco/drive e o foco no SAP real precisam de validação no ambiente de uso.
+
 ## [1.0.4] - 2026-10-09
 
 ### Catálogo SAP e embeddings

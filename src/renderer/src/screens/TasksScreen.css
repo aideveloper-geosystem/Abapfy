@@ -799,3 +799,7 @@
 .tasks-records td button { text-align: left; color: var(--color-primary); font: inherit; }
 .tasks-records p { padding: 18px; color: var(--color-ink-muted); }
 .tasks-filter-bar button:focus-visible, .tasks-records button:focus-visible, .tasks-filter-bar label:focus-within { outline: 2px solid var(--color-primary-focus); outline-offset: 2px; }
+
+.task-client-label { color: var(--color-ink-subtle); font-size: 11px; margin: 6px 0; font-weight: 600; }
+.task-session-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.tasks-filter-bar > select { max-width: 240px; padding: 8px 12px; border: 1px solid var(--color-hairline-strong); border-radius: 8px; background: var(--color-surface-2); color: inherit; }

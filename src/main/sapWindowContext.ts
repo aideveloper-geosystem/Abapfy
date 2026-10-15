@@ -140,6 +140,40 @@ public static class SapInputNative {
   [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] static extern bool AttachThreadInput(uint from, uint to, bool attach);
+  [DllImport("user32.dll")] static extern bool ShowWindowAsync(IntPtr h, int command);
+  [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr h);
+  public static bool Activate(IntPtr target) {
+    if (GetForegroundWindow() == target) return true;
+    if (IsIconic(target)) ShowWindowAsync(target, 9);
+    SetForegroundWindow(target);
+    for (int i = 0; i < 4; i++) {
+      if (GetForegroundWindow() == target) return true;
+      Thread.Sleep(25);
+    }
+    uint pid;
+    uint current = GetCurrentThreadId();
+    uint foreground = GetWindowThreadProcessId(GetForegroundWindow(), out pid);
+    uint selected = GetWindowThreadProcessId(target, out pid);
+    bool joinedForeground = false, joinedTarget = false;
+    try {
+      if (foreground != 0 && foreground != current)
+        joinedForeground = AttachThreadInput(current, foreground, true);
+      if (selected != 0 && selected != current && selected != foreground)
+        joinedTarget = AttachThreadInput(current, selected, true);
+      BringWindowToTop(target);
+      SetForegroundWindow(target);
+    } finally {
+      if (joinedTarget) AttachThreadInput(current, selected, false);
+      if (joinedForeground) AttachThreadInput(current, foreground, false);
+    }
+    for (int i = 0; i < 12; i++) {
+      if (GetForegroundWindow() == target) return true;
+      Thread.Sleep(25);
+    }
+    return false;
+  }
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect rect);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
@@ -166,7 +200,6 @@ public static class SapInputNative {
       if (c == '\n') { Key(13); continue; }
       if (c == '\t') { Key(9); continue; }
       SendUnicode(c);
-      Thread.Sleep(2);
     }
   }
   [StructLayout(LayoutKind.Sequential)] public struct Input { public uint type; public Union u; }
@@ -197,9 +230,7 @@ if (-not [SapInputNative]::IsWindow($handle)) { throw 'A janela SAP selecionada 
 [uint32]$actualPid = 0
 [void][SapInputNative]::GetWindowThreadProcessId($handle, [ref]$actualPid)
 if ($actualPid -ne [uint32]$targetPid) { throw 'O processo da janela SAP mudou.' }
-[void][SapInputNative]::SetForegroundWindow($handle)
-Start-Sleep -Milliseconds 180
-if ([SapInputNative]::GetForegroundWindow() -ne $handle) { throw 'Não foi possível colocar a janela SAP em primeiro plano.' }
+if (-not [SapInputNative]::Activate($handle)) { throw 'Não foi possível colocar a janela SAP em primeiro plano. Ative a janela SAP e capture novamente. Verifique se SAP e Abapfy têm o mesmo nível de permissão. Nenhuma entrada foi enviada.' }
 $rect = New-Object SapInputNative+Rect
 if (-not [SapInputNative]::GetWindowRect($handle, [ref]$rect)) { throw 'Não foi possível medir a janela SAP.' }
 if ($rect.Left -ne $expectedLeft -or $rect.Top -ne $expectedTop -or

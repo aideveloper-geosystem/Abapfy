@@ -14,6 +14,7 @@ import { useAgentsStore } from '@renderer/store/agentsStore'
 import { useChatStore } from '@renderer/store/chatStore'
 import { useUsageStore } from '@renderer/store/usageStore'
 import { useMcpStore } from '@renderer/store/mcpStore'
+import { useEstimativaParametrosStore } from '@renderer/store/estimativaParametrosStore'
 import { useTasksStore } from '@renderer/store/tasksStore'
 import { useClientsStore } from '@renderer/store/clientsStore'
 
@@ -69,6 +70,7 @@ function App(): JSX.Element {
       resetMcp()
       resetTasks()
       resetClients()
+      useEstimativaParametrosStore.getState().reset()
     }
   }, [
     status,

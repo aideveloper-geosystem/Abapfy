@@ -19,6 +19,7 @@ export interface TaskColumn {
 
 export interface TaskSubtask {
   id: string
+  chatId: string | null
   taskId: string
   title: string
   completed: boolean
@@ -26,6 +27,9 @@ export interface TaskSubtask {
 }
 
 export interface TaskItem {
+  clientId: string | null
+  moduleId: string | null
+  folderId: string | null
   id: string
   title: string
   description: string | null
@@ -47,6 +51,9 @@ export interface TaskItem {
 }
 
 export interface TaskInput {
+  clientId: string
+  moduleId: string
+  folderId: string
   title: string
   description: string
   status: TaskStatus
@@ -122,6 +129,7 @@ interface TasksState {
   updateColumn: (id: string, name: string, description: string, color: string) => Promise<boolean>
   moveColumn: (id: string, direction: -1 | 1) => Promise<void>
   deleteColumn: (id: string) => Promise<boolean>
+  linkSession: (taskId: string, subtaskId: string | null, chatId: string) => Promise<boolean>
   reset: () => void
 }
 
@@ -133,6 +141,7 @@ function mapSubtask(row: Record<string, unknown>): TaskSubtask {
   return {
     id: row.id as string,
     taskId: row.task_id as string,
+    chatId: (row.chat_id as string | null) ?? null,
     title: row.title as string,
     completed: row.completed as boolean,
     position: Number(row.position)
@@ -154,6 +163,9 @@ function mapColumn(row: Record<string, unknown>): TaskColumn {
 
 function mapTask(row: Record<string, unknown>): TaskItem {
   return {
+    clientId: (row.client_id as string | null) ?? null,
+    moduleId: (row.module_id as string | null) ?? null,
+    folderId: (row.folder_id as string | null) ?? null,
     id: row.id as string,
     title: row.title as string,
     description: row.description as string | null,
@@ -184,6 +196,9 @@ function numericOrNull(value: string): number | null {
 
 function taskPatch(input: TaskInput): Record<string, unknown> {
   return {
+    client_id: input.clientId || null,
+    module_id: input.moduleId || null,
+    folder_id: input.folderId || null,
     title: input.title.trim(),
     description: input.description.trim() || null,
     status: input.status,
@@ -227,6 +242,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       .select('*')
       .eq('user_id', userId)
       .order('position')
+    if (currentUserId() !== userId) return
     let columnRows = columnsResult.data
     if (columnsResult.error) {
       set({
@@ -253,6 +269,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       .select('*, task_subtasks(*)')
       .eq('user_id', userId)
       .order('position')
+    if (currentUserId() !== userId) return
     if (error) {
       set({
         loaded: true,
@@ -283,7 +300,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       .insert({ user_id: userId, ...taskPatch(input), position: maxPosition + 1000 })
       .select('*')
       .single()
-    if (error || !data) return null
+    if (currentUserId() !== userId || error || !data) return null
     const task = mapTask({ ...data, task_subtasks: [] })
     set((state) => ({ tasks: [...state.tasks, task] }))
     return task
@@ -305,12 +322,15 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       : current.position
     const patch = { ...taskPatch(input), position }
     const { error } = await supabase.from('tasks').update(patch).eq('id', id).eq('user_id', userId)
-    if (error) return false
+    if (currentUserId() !== userId || error) return false
     set((state) => ({
       tasks: state.tasks.map((task) =>
         task.id === id
           ? {
               ...task,
+              clientId: input.clientId || null,
+              moduleId: input.moduleId || null,
+              folderId: input.folderId || null,
               title: input.title.trim(),
               description: input.description.trim() || null,
               status: input.status,
@@ -339,6 +359,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       const next = await get().createTask({
         ...input,
         status: todo.key,
+        chatId: '',
         dueDate: nextRecurringDate(input.dueDate || null, input.recurrence) ?? '',
         actualHours: '0',
         reminderAt: ''
@@ -398,6 +419,9 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       const todo =
         get().columns.find((column) => !column.isDone && !column.isBlocked) ?? get().columns[0]
       const next = await get().createTask({
+        clientId: moving.clientId ?? '',
+        moduleId: moving.moduleId ?? '',
+        folderId: moving.folderId ?? '',
         title: moving.title,
         description: moving.description ?? '',
         status: todo.key,
@@ -407,7 +431,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
         sapModule: moving.sapModule ?? '',
         assignee: moving.assignee ?? '',
         projectId: moving.projectId ?? '',
-        chatId: moving.chatId ?? '',
+        chatId: '',
         estimatedHours: moving.estimatedHours?.toString() ?? '',
         actualHours: '0',
         dependencyIds: moving.dependencyIds,
@@ -440,7 +464,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
         }))
       )
       .select('*')
-    if (!data) return
+    if (currentUserId() !== userId || !data) return
     set((state) => ({
       tasks: state.tasks.map((item) =>
         item.id === taskId
@@ -457,7 +481,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       .update({ completed })
       .eq('id', id)
       .eq('user_id', userId)
-    if (!error)
+    if (currentUserId() === userId && !error)
       set((state) => ({
         tasks: state.tasks.map((task) => ({
           ...task,
@@ -499,7 +523,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       })
       .select('*')
       .single()
-    if (error || !data) return false
+    if (currentUserId() !== userId || error || !data) return false
     set((state) => ({ columns: [...state.columns, mapColumn(data)] }))
     return true
   },
@@ -569,6 +593,19 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       .eq('user_id', userId)
     if (error) return false
     set((state) => ({ columns: state.columns.filter((item) => item.id !== id) }))
+    return true
+  },
+  linkSession: async (taskId, subtaskId, chatId) => {
+    const userId = currentUserId()
+    if (!userId || !get().tasks.some((task) => task.id === taskId)) return false
+    const result = subtaskId
+      ? await supabase.from('task_subtasks').update({ chat_id: chatId }).eq('id', subtaskId).eq('task_id', taskId).eq('user_id', userId).select('id').single()
+      : await supabase.from('tasks').update({ chat_id: chatId }).eq('id', taskId).eq('user_id', userId).select('id').single()
+    if (result.error || !result.data) { set({ error: 'Não foi possível vincular a sessão à tarefa.' }); return false }
+    if (currentUserId() !== userId) return false
+    set((state) => ({ tasks: state.tasks.map((task) => task.id !== taskId ? task : subtaskId
+      ? { ...task, subtasks: task.subtasks.map((subtask) => subtask.id === subtaskId ? { ...subtask, chatId } : subtask) }
+      : { ...task, chatId }) }))
     return true
   },
   reset: () => set({ loaded: false, loading: false, tasks: [], columns: [], error: null })
