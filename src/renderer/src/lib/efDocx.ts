@@ -1,6 +1,7 @@
 import { applyEfTemplateEdits, type EfTemplateEdit, type EfTemplateSnapshot } from './efTemplate'
 
 export interface EfDocxData {
+  specification_type?: 'simples' | 'tecnica' | 'avancada'
   project_name: string
   author: string
   client_name: string
@@ -22,6 +23,7 @@ Markdown sem gerar novo documento. Para lacunas críticas, use o formato clarify
 
 \`\`\`ef-docx
 {
+  "specification_type": "simples | tecnica | avancada",
   "project_name": "...",
   "author": "...",
   "client_name": "...",
@@ -47,6 +49,8 @@ function normalizeParsedData(parsed: unknown): EfDocxData | null {
     typeof value === 'string' && value.trim() ? value.trim() : fallback
 
   return {
+    ...(['simples', 'tecnica', 'avancada'].includes(record.specification_type as string)
+      ? { specification_type: record.specification_type as EfDocxData['specification_type'] } : {}),
     project_name: record.project_name.trim(),
     author: field(record.author, 'A CONFIRMAR'),
     client_name: field(record.client_name, 'A CONFIRMAR'),
@@ -168,7 +172,19 @@ function escapeRegex(text: string): string {
 
 export async function generateEfDocx(data: EfDocxData, clientTemplate?: EfTemplateSnapshot): Promise<Blob> {
   if (!clientTemplate) throw new Error('O modelo EF deve ser carregado do drive: default.docx ou base.docx na raiz do módulo EFs do cliente. Gere uma nova EF para usar esse modelo.')
-  return applyEfTemplateEdits(clientTemplate, data.template_revision, data.template_edits)
+  const edits = data.template_edits?.map((edit) => ({ ...edit }))
+  // Fill explicit project-name placeholders even when the model omits a copy
+  // hidden in a cover/header text box. Never infer arbitrary institutional text.
+  if (edits && data.project_name?.trim()) {
+    for (const paragraph of clientTemplate.paragraphs) {
+      if (!paragraph.editable || !/^(?:INSIRA AQUI O NOME DO PROJETO|NOME DO PROJETO)$/i.test(paragraph.text.trim())) continue
+      const existing = edits.find((edit) => edit.paragraph_id === paragraph.id)
+      if (existing) {
+        if (existing.blocks === undefined && (!existing.text?.trim() || existing.text.trim() === paragraph.text.trim())) existing.text = data.project_name.trim()
+      } else edits.push({ paragraph_id: paragraph.id, text: data.project_name.trim() })
+    }
+  }
+  return applyEfTemplateEdits(clientTemplate, data.template_revision, edits)
 }
 
 export function efDocxFileName(data: EfDocxData): string {

@@ -1,4 +1,5 @@
 import enhancementFinderContract from '../agents/enhancement-finder.md?raw'
+import efConsultantContract from '../agents/ef-consultant.md?raw'
 
 // Applied per turn so refinements also reach existing chats without overwriting
 // administrator-managed prompts or requiring a database migration.
@@ -24,7 +25,7 @@ Os cálculos determinísticos da interface cobrem somente analise_ef, espec, cod
 Os multiplicadores são fixos: agressiva 0.75, segura 1.00, tranquila 1.35. Use distribuição completa e total_horas igual à soma das cinco fases em cada cenário. tipo/objeto/complexidade devem corresponder aos parâmetros. Não invente objetos de desenvolvimento não sustentados pelo requisito: marque candidatos e dependências nas notas.
 outros só pode conter horas adicionais explicitamente fornecidas ou fundamentadas em uma fonte de horas informada; descreva quais atividades, fonte e horas nas premissas de cada cenário. Essas horas serão preservadas no recálculo da complexidade, sem aplicar os fatores novamente. Sem base para outras fases use outros 0 e declare a pendência.
 Se os parâmetros estiverem vazios/indisponíveis, não entregue cartões com números zero que pareçam uma estimativa concluída: responda em Markdown explicando a pendência de cadastro dos parâmetros. Não invente totais.`,
-  ef_consultant: `## Qualidade e continuidade da EF
+  ef_consultant: `${efConsultantContract}\n\n## Qualidade e continuidade da EF
 Ao gerar ou revisar uma EF completa, use o contrato ef-docx. Distingua informações confirmadas, premissas e pontos a confirmar dentro das seções. Não trate tabelas/campos sugeridos como confirmados. Inclua critérios de aceite verificáveis, exceções e dependências pertinentes.
 macro_overview é uma síntese do processo, não uma cópia de functional_spec. functional_spec contém seções detalhadas de objetivo, escopo, fluxo, regras, dados/tabelas, interfaces, erros, critérios de aceite e pendências quando pertinentes. Mantenha o modelo Word existente.
 Quando o usuário pedir apenas uma explicação, responder uma dúvida ou discutir um trecho, responda em Markdown direto e não em ef-docx; gere novo documento somente quando o pedido exigir uma EF completa ou revisada. O contrato de geração do Word não obriga a gerar documento em toda mensagem.`

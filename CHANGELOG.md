@@ -6,6 +6,21 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-10-21
+
+### Especificações Funcionais
+
+- Escolha entre EF Simples, Técnica e Avançada. Quando o tipo não estiver definido na demanda, o agente pergunta antes de gerar; a opção Avançada inclui exemplos ABAP de apoio.
+- Documentos Word com parágrafos espaçados, subtítulos, tabelas estruturadas, blocos de código monoespaçados e fluxos de etapas editáveis, conforme o conteúdo e o tipo escolhido.
+- Corpo das seções extensas sem herdar o negrito do modelo, com orientação para preencher todos os campos aplicáveis, incluindo escopo, motivo da mudança, riscos e critérios de aceite.
+- Corrigida a leitura e edição de textos em caixas de texto da capa e dos cabeçalhos, preservando formas, efeitos, logotipos e versões alternativas de compatibilidade do Word.
+- Preenchimento automático dos placeholders explícitos de nome do projeto, inclusive quando uma ocorrência é omitida pelo agente.
+
+### Compatibilidade
+
+- Mantido o uso do modelo DOCX do cliente e o salvamento na pasta selecionada. Nenhuma nova migração de banco é necessária.
+- Arquivos já salvos permanecem disponíveis. Respostas pendentes geradas com a identificação antiga dos parágrafos exigem uma nova geração para evitar aplicação em campos incorretos.
+
 ## [1.0.5] - 2026-10-15
 
 ### Controle SAP

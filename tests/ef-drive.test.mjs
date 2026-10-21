@@ -78,6 +78,83 @@ test('generation requires a drive template and never fetches a bundled fallback'
   assert.match(templates.efDocxText(await blob.arrayBuffer()), /Projeto: Teste/)
 })
 
+test('rich sections use spaced paragraphs, normal body weight, editable tables, code and flow', async () => {
+  const snapshot = await templates.readEfTemplate(templateBuffer())
+  const blob = templates.applyEfTemplateEdits(snapshot, snapshot.revision, [{
+    paragraph_id: '0:p1', blocks: [
+      { type: 'heading', text: 'Validações' },
+      { type: 'paragraph', text: 'Texto normal.\n\nOutro parágrafo.' },
+      { type: 'code', language: 'abap', text: "IF amount < 0.\n  MESSAGE 'Erro' TYPE 'E'.\nENDIF." },
+      { type: 'table', headers: ['Campo', 'Regra'], rows: [['Valor', 'Maior que zero']] },
+      { type: 'diagram', caption: 'Fluxo', steps: ['Receber', 'Validar', 'Exibir'] }
+    ]
+  }])
+  const zip = new PizZip(await blob.arrayBuffer())
+  const xml = zip.file('word/document.xml').asText()
+  assert.match(xml, /<w:b w:val="0"\/>/)
+  assert.match(xml, /w:after="120"/)
+  assert.match(xml, /w:ascii="Consolas"/)
+  assert.match(xml, /amount &lt; 0/)
+  assert.match(xml, /<w:tblHeader\/>/)
+  assert.match(xml, /3\. Exibir/)
+  assert.equal((xml.match(/<w:tbl>/g) ?? []).length, 3)
+  assert.match(xml, /<\/w:tbl><w:p>/) // nested table followed by required paragraph
+  assert.deepEqual(Array.from(zip.file('word/media/logo.png').asUint8Array()), [1, 2, 3, 4])
+  assert.match(templates.efDocxText(await blob.arrayBuffer()), /Texto normal\.\nOutro parágrafo\./)
+})
+
+test('rich sections reject unsafe content, malformed tables, mixed edits and fixed template titles', async () => {
+  const snapshot = await templates.readEfTemplate(templateBuffer())
+  const apply = (edit) => templates.applyEfTemplateEdits(snapshot, snapshot.revision, [{ paragraph_id: '0:p1', ...edit }])
+  for (const blocks of [[], [{ type: 'raw_xml', text: '<evil/>' }], [{ type: 'paragraph', text: '\u0001' }],
+    [{ type: 'table', headers: ['A', 'B'], rows: [['incompleta']] }], [{ type: 'diagram', steps: [] }]])
+    assert.throws(() => apply({ blocks }), /inválid|desconhecido|inconsistentes/)
+  assert.throws(() => apply({ text: 'Texto', blocks: [{ type: 'paragraph', text: 'Outro' }] }), /simultâneo/)
+  assert.throws(() => apply({ paragraph_id: '1:p0', blocks: [{ type: 'paragraph', text: 'Header' }] }), /corpo/)
+  assert.throws(() => apply({ paragraph_id: '0:p0', blocks: [{ type: 'paragraph', text: 'Title' }] }), /corpo/)
+  const blob = apply({ blocks: [{ type: 'paragraph', text: '<w:drawing/> & texto' }] })
+  const xml = new PizZip(await blob.arrayBuffer()).file('word/document.xml').asText()
+  assert.match(xml, /&lt;w:drawing\/&gt; &amp; texto/)
+})
+
+test('EF refinement asks for the profile before generation and keeps all three depths explicit', () => {
+  const policy = loadTs('src/renderer/src/lib/agentRefinements.ts').agentRefinementContract('ef_consultant')
+  const question = loadTs('src/renderer/src/lib/clarify.ts').parseClarify(policy.match(/```clarify[\s\S]*?```/)[0])
+  assert.deepEqual(Array.from(question.options), ['Técnica', 'Simples', 'Avançada'])
+  for (const profile of ['simples', 'tecnica', 'avancada']) assert.ok(policy.includes(`specification_type: "${profile}"`))
+  assert.match(policy, /sem repetir a pergunta/)
+  assert.match(policy, /Não se limite a macro e micro/)
+  const ef = loadTs('src/renderer/src/lib/efDocx.ts')
+  const data = ef.parseEfDocxData(JSON.stringify({ project_name: 'Projeto', functional_spec: 'Descrição', specification_type: 'avancada' }))
+  assert.equal(data.specification_type, 'avancada')
+})
+
+test('cover and header text boxes expose editable leaf text and preserve shape XML in both Word branches', async () => {
+  const zip = new PizZip(templateBuffer())
+  const box = (text) => `<w:p><w:r><w:rPr><w:b/></w:rPr><w:drawing><wps:txbx><w:txbxContent><w:p><w:r><w:rPr><w:b/><w:sz w:val="48"/></w:rPr><w:t>${text}</w:t></w:r></w:p></w:txbxContent></wps:txbx></w:drawing></w:r></w:p>`
+  const cover = `<mc:AlternateContent><mc:Choice Requires="wps">${box('INSIRA AQUI O NOME DO PROJETO')}</mc:Choice><mc:Fallback>${box('INSIRA AQUI O NOME DO PROJETO')}</mc:Fallback></mc:AlternateContent>`
+  zip.file('word/document.xml', zip.file('word/document.xml').asText().replace('<w:body>', `<w:body>${cover}`))
+  zip.file('word/header1.xml', `<w:hdr>${box('EWM - IMPRESSÃO')}<w:p><w:r><w:drawing><a:blip r:embed="rIdLogo"/></w:drawing></w:r></w:p></w:hdr>`)
+  const s = await templates.readEfTemplate(zip.generate({ type: 'arraybuffer' }))
+  const titles = s.paragraphs.filter(p => p.text === 'INSIRA AQUI O NOME DO PROJETO')
+  assert.equal(titles.length, 2)
+  for (const title of titles) { assert.equal(title.editable, true); assert.equal(title.textOnly, true) }
+  const header = s.paragraphs.find(p => p.text === 'EWM - IMPRESSÃO')
+  assert.equal(header.editable, true)
+  assert.throws(() => templates.applyEfTemplateEdits(s, s.revision, [{ paragraph_id: titles[0].id, blocks: [{ type: 'paragraph', text: 'Perderia o desenho' }] }]), /corpo/)
+  const ef = loadTs('src/renderer/src/lib/efDocx.ts')
+  const blob = await ef.generateEfDocx({ project_name: 'Pedidos & entregas', template_revision: s.revision, template_edits: [{ paragraph_id: header.id, text: 'Pedidos & entregas' }] }, s)
+  const result = new PizZip(await blob.arrayBuffer())
+  const body = result.file('word/document.xml').asText()
+  assert.equal((body.match(/Pedidos &amp; entregas/g) ?? []).length, 2)
+  assert.ok(!body.includes('INSIRA AQUI'))
+  assert.match(result.file('word/header1.xml').asText(), /Pedidos &amp; entregas/)
+  assert.match(result.file('word/header1.xml').asText(), /r:embed="rIdLogo"/)
+  // Comparing XML with only text nodes removed checks every wrapper/run/shape.
+  const withoutText = xml => xml.replace(/<w:t\b[^>]*>[\s\S]*?<\/w:t>/g, '<w:t/>')
+  for (const part of ['word/document.xml', 'word/header1.xml']) assert.equal(withoutText(result.file(part).asText()), withoutText(zip.file(part).asText()))
+})
+
 const job = () => ({
   fileId: 'file-output',
   clientId: 'client-a',
