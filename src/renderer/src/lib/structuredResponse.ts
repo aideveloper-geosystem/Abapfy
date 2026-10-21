@@ -10,7 +10,7 @@
 
 export function extractSoleJsonBlock(content: string): string {
   const trimmed = content.trim()
-  const fenced = trimmed.match(/^```[\w-]*\n([\s\S]*?)\n?```$/)
+  const fenced = trimmed.match(/^```[\w-]*\r?\n([\s\S]*?)\r?\n?```$/)
   return fenced ? fenced[1].trim() : trimmed
 }
 

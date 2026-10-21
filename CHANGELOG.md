@@ -15,6 +15,7 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 - Corpo das seções extensas sem herdar o negrito do modelo, com orientação para preencher todos os campos aplicáveis, incluindo escopo, motivo da mudança, riscos e critérios de aceite.
 - Corrigida a leitura e edição de textos em caixas de texto da capa e dos cabeçalhos, preservando formas, efeitos, logotipos e versões alternativas de compatibilidade do Word.
 - Preenchimento automático dos placeholders explícitos de nome do projeto, inclusive quando uma ocorrência é omitida pelo agente.
+- Respostas estruturadas e perguntas de esclarecimento aceitam blocos com quebras de linha Windows e Unix.
 
 ### Compatibilidade
 

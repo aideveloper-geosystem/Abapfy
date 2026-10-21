@@ -121,6 +121,13 @@ test('EF refinement asks for the profile before generation and keeps all three d
   const policy = loadTs('src/renderer/src/lib/agentRefinements.ts').agentRefinementContract('ef_consultant')
   const question = loadTs('src/renderer/src/lib/clarify.ts').parseClarify(policy.match(/```clarify[\s\S]*?```/)[0])
   assert.deepEqual(Array.from(question.options), ['Técnica', 'Simples', 'Avançada'])
+  const clarifyBlock = policy.match(/```clarify[\s\S]*?```/)[0].replace(/\r\n/g, '\n')
+  for (const newline of ['\n', '\r\n']) {
+    const parsed = loadTs('src/renderer/src/lib/clarify.ts').parseClarify(clarifyBlock.replace(/\n/g, newline))
+    assert.deepEqual(Array.from(parsed.options), ['Técnica', 'Simples', 'Avançada'])
+    const structured = loadTs('src/renderer/src/lib/structuredResponse.ts').parseStructuredJson(['```json', '{"project_name":"Teste","functional_spec":"Descrição"}', '```'].join(newline))
+    assert.equal(structured.project_name, 'Teste')
+  }
   for (const profile of ['simples', 'tecnica', 'avancada']) assert.ok(policy.includes(`specification_type: "${profile}"`))
   assert.match(policy, /sem repetir a pergunta/)
   assert.match(policy, /Não se limite a macro e micro/)
