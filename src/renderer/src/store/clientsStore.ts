@@ -5,6 +5,7 @@ import { useAuthStore } from './authStore'
 export interface ClientModule {
   id: string
   clientId: string
+  createdBy?: string | null
   name: string
   description: string | null
   createdAt: string
@@ -66,6 +67,7 @@ export const useClientsStore = create<ClientsState>((set, get) => ({
       modules: (modulesResult.data ?? []).map((row) => ({
         id: row.id,
         clientId: row.client_id,
+        createdBy: row.created_by ?? null,
         name: row.name,
         description: row.description,
         createdAt: row.created_at

@@ -1,0 +1,113 @@
+.integrations-container {
+  max-width: 760px;
+}
+.integration-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--color-hairline);
+  padding-bottom: 10px;
+}
+.integration-tabs button,
+.sap-adt-connections button {
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  padding: 10px 14px;
+  cursor: pointer;
+  font: inherit;
+}
+.integration-tabs [aria-selected='true'],
+.sap-adt-connections [aria-pressed='true'] {
+  border-color: var(--color-ink-subtle);
+  background: var(--color-surface-2);
+}
+.sap-adt-connections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.sap-adt-connections button {
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.sap-adt-connections span {
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+}
+.sap-adt-form,
+.sap-adt-form fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.sap-adt-form fieldset {
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+.sap-adt-form legend {
+  padding: 0 6px;
+  font-weight: 600;
+}
+.sap-adt-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+}
+.sap-adt-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.sap-adt-full {
+  grid-column: 1 / -1;
+}
+.sap-adt-form input:not([type='checkbox']),
+.sap-adt-form select,
+.sap-adt-form textarea {
+  box-sizing: border-box;
+  width: 100%;
+  background: var(--color-canvas);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+  color: var(--color-ink);
+  padding: 10px;
+  font: inherit;
+}
+.sap-adt-form label.sap-adt-check,
+.sap-adt-form label.mcp-agent-option {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.sap-adt-form input[type='checkbox'] {
+  accent-color: var(--color-ink);
+}
+.sap-adt-form details summary {
+  cursor: pointer;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.sap-adt-form fieldset:disabled {
+  opacity: 0.65;
+}
+.sap-adt-form .mcp-card-actions {
+  flex-wrap: wrap;
+}
+.sap-adt-form button.settings-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+@media (max-width: 1000px) {
+  .sap-adt-grid {
+    grid-template-columns: 1fr;
+  }
+}

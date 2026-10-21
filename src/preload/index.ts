@@ -122,18 +122,6 @@ const mcp = {
   }
 }
 
-const sapGui = {
-  readSettings: (userId: string) => ipcRenderer.invoke('sapGui:readSettings', userId),
-  saveSettings: (userId: string, value: unknown) =>
-    ipcRenderer.invoke('sapGui:saveSettings', userId, value),
-  listSessions: () => ipcRenderer.invoke('sapGui:listSessions'),
-  snapshot: (userId: string) => ipcRenderer.invoke('sapGui:snapshot', userId),
-  controlStatus: () => ipcRenderer.invoke('sapGui:controlStatus'),
-  control: (userId: string, action: unknown, callId: string, captureId: string) =>
-    ipcRenderer.invoke('sapGui:control', userId, action, callId, captureId),
-  cancelControl: (callId: string) => ipcRenderer.send('sapGui:cancelControl', callId)
-}
-
 const localFeatures: LocalFeaturesApi = {
   setCompaction: (userId, settings) =>
     ipcRenderer.invoke('localFeatures:setCompaction', userId, settings),
@@ -157,12 +145,25 @@ const localFeatures: LocalFeaturesApi = {
   search: (userId, query) => ipcRenderer.invoke('localFeatures:search', userId, query)
 }
 
+const sapAdt: import('../shared/sapAdt').SapAdtApi = {
+  stopDebug: (token, id) => ipcRenderer.invoke('sapAdt:stopDebug', token, id),
+  list: (token) => ipcRenderer.invoke('sapAdt:list', token),
+  save: (token, connection, password) => ipcRenderer.invoke('sapAdt:save', token, connection, password),
+  remove: (token, id) => ipcRenderer.invoke('sapAdt:remove', token, id),
+  setPassword: (token, id, password) => ipcRenderer.invoke('sapAdt:setPassword', token, id, password),
+  test: (token, id) => ipcRenderer.invoke('sapAdt:test', token, id),
+  beginTurn: (token, agent, expectedUserId, connectionId) => ipcRenderer.invoke('sapAdt:beginTurn', token, agent, expectedUserId, connectionId),
+  callTool: (id, name, args, callId) => ipcRenderer.invoke('sapAdt:callTool', id, name, args, callId),
+  endTurn: (id) => ipcRenderer.invoke('sapAdt:endTurn', id),
+  closeAll: () => ipcRenderer.invoke('sapAdt:closeAll')
+}
+
 const api = {
+  sapAdt,
   localFeatures,
   windowControls,
   updates,
   mcp,
-  sapGui,
   documents: {
     renderPdf: (html: string) => ipcRenderer.invoke('document:renderPdf', html) as Promise<string>,
     openDocx: (bytes: Uint8Array, fileName: string) =>

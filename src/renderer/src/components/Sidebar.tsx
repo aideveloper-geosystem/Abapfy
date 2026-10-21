@@ -27,6 +27,9 @@ import { useChatStore, type ChatSummary, type ProjectSummary } from '@renderer/s
 import { useChatRuntimeStore } from '@renderer/store/chatRuntimeStore'
 import { presenceLabel, type WorkPresence } from '@renderer/lib/workPresence'
 import { UsageModal } from '@renderer/components/UsageModal'
+import { useClientsStore } from '@renderer/store/clientsStore'
+import { useAuthorNames } from '@renderer/lib/useAuthorNames'
+import { creatorLabel, matchesContent, matchesOwner, contentDate, type OwnerFilter } from '@renderer/lib/contentOwnership'
 import './Sidebar.css'
 
 type ShortcutId = 'new-session' | 'projects' | 'clients' | 'tasks' | 'skills' | 'agents' | 'news'
@@ -230,6 +233,7 @@ export function Sidebar({
   const [menuOpen, setMenuOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const [query, setQuery] = useState('')
+  const [chatScope, setChatScope] = useState<OwnerFilter>('mine')
   const [signOutError, setSignOutError] = useState<string | null>(null)
   const navigate = useNavigate()
   const [usageOpen, setUsageOpen] = useState(false)
@@ -263,6 +267,19 @@ export function Sidebar({
     archiveChat: state.archiveChat,
     moveChatToProject: state.moveChatToProject
   }))
+
+  const chatLoadError = useChatStore(state => state.error)
+  const clients = useClientsStore(state => state.clients)
+  const names = useAuthorNames([...recentChats.map(chat => chat.userId), ...projects.map(project => project.userId), ...Object.values(projectChats).flat().map(chat => chat.userId)])
+  const author = (id: string): string => creatorLabel(id, names, user?.id)
+  const clientName = (id: string): string => clients.find(client => client.id === id)?.name ?? ''
+  const searchChat = (chat: ChatSummary): boolean => matchesContent(query, chat.title, author(chat.userId), names[chat.userId], clientName(chat.clientId), chat.agentName)
+  const filteredChats = recentChats.filter(chat => matchesOwner(chat.userId, user?.id, chatScope) && searchChat(chat))
+  const matchesProject = (project: ProjectSummary): boolean => matchesContent(query, project.name, author(project.userId), names[project.userId], clientName(project.clientId))
+  const filteredProjects = projects.filter(project => matchesProject(project) || (projectChats[project.id] ?? []).some(searchChat))
+  useEffect(() => { setChatScope('mine'); setQuery('') }, [user?.id])
+  const chatCaption = (chat: ChatSummary): JSX.Element => <span className="sidebar-chat-copy"><span className="sidebar-chat-title">{chat.title}</span><small><span className="sidebar-author-name">{author(chat.userId)}</span>{clientName(chat.clientId) ? ' · ' + clientName(chat.clientId) : ''}</small></span>
+  const chatTooltip = (chat: ChatSummary): string => [chat.title, 'Criado por ' + author(chat.userId), clientName(chat.clientId), 'Atualizado em ' + contentDate(chat.updatedAt)].filter(Boolean).join(' · ')
 
   async function handleDeleteChat(chatId: string): Promise<boolean> {
     const ok = await deleteChat(chatId)
@@ -348,13 +365,17 @@ export function Sidebar({
       </nav>
 
       <div className="sidebar-scroll">
-        <label className="sidebar-search"><Search size={13} /><input value={query} aria-label="Buscar chats recentes e projetos carregados" placeholder="Buscar chats e projetos…" onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setQuery('') }} /></label>
+        <label className="sidebar-search"><Search size={13} /><input value={query} title="Busca nos chats recentes e projetos carregados" aria-label="Buscar chats recentes e projetos por nome, autor ou cliente" placeholder="Buscar nome, pessoa ou cliente…" onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setQuery('') }} /></label>
         <div className="sidebar-section">
           <span className="sidebar-section-title">Chats recentes</span>
+          <div className="sidebar-chat-scopes" role="group" aria-label="Autoria dos chats recentes">
+            {([['mine', 'Meus chats'], ['team', 'Equipe'], ['all', 'Todos']] as const).map(([scope,label]) => <button key={scope} type="button" aria-pressed={chatScope === scope} onClick={() => setChatScope(scope)}>{label}<span>{recentChats.filter(chat => matchesOwner(chat.userId, user?.id, scope) && searchChat(chat)).length}</span></button>)}
+          </div>
+          <small className="sidebar-scope-note">Sem projeto · conteúdo compartilhado</small>
+          {chatLoadError && <div className="sidebar-load-error" role="alert">Não foi possível atualizar os chats.<button type="button" onClick={() => void load()}>Tentar novamente</button></div>}
           <ul className="sidebar-list">
-            {recentChats.length === 0 && !query && <li className="sidebar-list-empty">Nenhum chat ainda</li>}
-            {query && !recentChats.some((chat) => chat.title.toLocaleLowerCase('pt-BR').includes(query.toLocaleLowerCase('pt-BR'))) && <li className="sidebar-list-empty">Nenhum chat recente encontrado.</li>}
-            {recentChats.filter((chat) => chat.title.toLocaleLowerCase('pt-BR').includes(query.toLocaleLowerCase('pt-BR'))).map((chat) => (
+            {filteredChats.length === 0 && <li className="sidebar-list-empty">{query ? 'Nenhum chat neste filtro.' : chatScope === 'mine' ? 'Você ainda não tem chats recentes.' : 'Nenhum chat recente neste grupo.'}</li>}
+            {filteredChats.map((chat) => (
               <li key={chat.id} className="sidebar-list-row">
                 <button
                   type="button"
@@ -363,10 +384,10 @@ export function Sidebar({
                       ? 'sidebar-list-item-active'
                       : ''
                   }`}
-                  title={chat.title}
+                  title={chatTooltip(chat)}
                   onClick={() => onSelectChat(chat.id)}
                 >
-                  {chat.title}
+                  {chatCaption(chat)}
                 </button>
                 <div className="sidebar-list-row-end">
                   {presenceLabel(workPresence.filter((item) => item.chatId === chat.id), user?.id ?? null) && <span className="sidebar-work-dot" title={presenceLabel(workPresence.filter((item) => item.chatId === chat.id), user?.id ?? null) ?? ''} />}
@@ -389,14 +410,13 @@ export function Sidebar({
         <div className="sidebar-section">
           <span className="sidebar-section-title">Projetos</span>
           <ul className="sidebar-list">
-            {projects.length === 0 && !query && <li className="sidebar-list-empty">Nenhum projeto ainda</li>}
-            {query && !projects.some((project) => project.name.toLocaleLowerCase('pt-BR').includes(query.toLocaleLowerCase('pt-BR'))) && <li className="sidebar-list-empty">Nenhum projeto encontrado.</li>}
-            {projects.filter((project) => project.name.toLocaleLowerCase('pt-BR').includes(query.toLocaleLowerCase('pt-BR'))).map((project) => (
+            {filteredProjects.length === 0 && <li className="sidebar-list-empty">{query ? 'Nenhum projeto encontrado.' : 'Nenhum projeto ainda'}</li>}
+            {filteredProjects.map((project) => (
               <li key={project.id}>
                 <button
                   type="button"
                   className="sidebar-list-item sidebar-list-item-btn sidebar-project-item"
-                  title={project.name}
+                  title={project.name + ' · Criado por ' + author(project.userId)}
                   onClick={() => toggleProject(project.id)}
                 >
                   <ChevronRight
@@ -406,14 +426,15 @@ export function Sidebar({
                       expandedProject === project.id ? 'sidebar-project-chevron-open' : ''
                     }`}
                   />
-                  {project.name}
+                  <span className="sidebar-chat-copy"><span className="sidebar-chat-title">{project.name}</span><small><span className="sidebar-author-name">{author(project.userId)}</span></small></span>
                 </button>
-                {expandedProject === project.id && (
+                {(expandedProject === project.id || Boolean(query.trim())) && (
                   <ul className="sidebar-sublist">
                     {(projectChats[project.id] ?? []).length === 0 && (
                       <li className="sidebar-list-empty sidebar-sublist-empty">Sem chats ainda</li>
                     )}
-                    {(projectChats[project.id] ?? []).map((chat) => (
+                    {(['mine', 'team'] as const).filter(scope => (projectChats[project.id] ?? []).some(chat => matchesOwner(chat.userId, user?.id, scope))).map(scope => <li key={scope} className="sidebar-project-chat-group"><span className="sidebar-section-title">{scope === 'mine' ? 'Meus chats' : 'Equipe'}</span><ul>
+                    {(projectChats[project.id] ?? []).filter(chat => matchesOwner(chat.userId, user?.id, scope) && (matchesProject(project) || searchChat(chat))).map((chat) => (
                       <li key={chat.id} className="sidebar-list-row sidebar-sublist-row">
                         <button
                           type="button"
@@ -422,10 +443,10 @@ export function Sidebar({
                               ? 'sidebar-list-item-active'
                               : ''
                           }`}
-                          title={chat.title}
+                          title={chatTooltip(chat)}
                           onClick={() => onSelectChat(chat.id)}
                         >
-                          {chat.title}
+                          {chatCaption(chat)}
                         </button>
                         {presenceLabel(workPresence.filter((item) => item.chatId === chat.id), user?.id ?? null) && <span className="sidebar-work-dot" title={presenceLabel(workPresence.filter((item) => item.chatId === chat.id), user?.id ?? null) ?? ''} />}
                         <ChatRowMenu
@@ -439,6 +460,7 @@ export function Sidebar({
                         />
                       </li>
                     ))}
+                    </ul></li>)}
                   </ul>
                 )}
               </li>

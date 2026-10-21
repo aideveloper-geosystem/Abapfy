@@ -6,6 +6,30 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-10-21
+
+### Integração SAP ADT
+
+- Conexões SAP privadas por conta e computador, gerenciáveis por qualquer usuário em Configurações > Integrações, com senha protegida pelo sistema operacional.
+- Seletor de conexão/ambiente no chat. Cada mensagem disponibiliza ao agente somente a conexão escolhida; Sem conexão SAP desativa o acesso.
+- Pesquisa de objetos, leitura paginada de fontes ativas/inativas e consultas de tabelas com filtros e limites.
+- Edição sob lock, criação e ativação de objetos, where-used, sintaxe, ABAP Unit, ATC, gerenciamento de requests e debug interativo do próprio usuário.
+- Permissões individuais por conexão/agente; operações sensíveis exigem aprovação e continuam sujeitas às autorizações do SAP. As permissões avançadas começam desativadas.
+- Removidos o computer use SAP GUI, a captura automática de janelas e os canais de mouse/teclado. O acesso SAP passa a utilizar ADT.
+
+### Organização do workspace
+
+- Sidebar com Meus chats, Equipe e Todos, autor destacado conforme o tema, cliente e busca por nome/autoria. Carregamento separado impede que a atividade da equipe esconda os próprios chats recentes.
+- Clientes e módulos exibem criador e data. Catálogo e conteúdo têm filtros de autoria; chats antigos do módulo podem ser carregados em páginas adicionais.
+- Exclusão de projetos com confirmação: preserva chats, tarefas e arquivos do cliente, remove o vínculo com o projeto e exclui os documentos da sua base de conhecimento.
+
+### Compatibilidade e validação
+
+- Nenhuma nova migração de banco é necessária. Conexões e senhas SAP não são sincronizadas entre computadores.
+- Conteúdo SAP consultado pode ser enviado ao provedor de IA da conversa. Operações avançadas dependem dos serviços ADT disponíveis e devem ser validadas no ambiente de desenvolvimento.
+- CI executa toda a suíte de testes atual, incluindo isolamento das conexões, políticas ADT, organização dos conteúdos e exclusão de projetos.
+
+
 ## [1.0.6] - 2026-10-21
 
 ### Especificações Funcionais

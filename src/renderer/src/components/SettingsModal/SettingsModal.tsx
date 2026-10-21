@@ -4,7 +4,6 @@ import {
   Building2,
   Download,
   Palette,
-  Monitor,
   Server,
   SlidersHorizontal,
   Database,
@@ -18,8 +17,7 @@ import { ProfileSection } from './ProfileSection'
 import { AiSection } from './AiSection'
 import { ParametrosSection } from './ParametrosSection'
 import { UpdatesSection } from './UpdatesSection'
-import { McpSection } from './McpSection'
-import { SapContextSection } from './SapContextSection'
+import { IntegrationsSection } from './IntegrationsSection'
 import { AdministrationSection } from './AdministrationSection'
 import { FeaturesSection } from './FeaturesSection'
 import { CatalogAdministration } from './CatalogAdministration'
@@ -31,7 +29,6 @@ type SectionId =
   | 'general'
   | 'ai'
   | 'mcp'
-  | 'sap-context'
   | 'parametros'
   | 'clients'
   | 'administration'
@@ -44,8 +41,7 @@ const SECTIONS: { id: SectionId; label: string; icon: typeof Palette; group: str
   { id: 'general', label: 'Aparência', icon: Palette, group: 'Pessoal' },
   { id: 'ai', label: 'Inteligência Artificial', icon: Bot, group: 'Trabalho' },
   { id: 'features', label: 'Features', icon: SlidersHorizontal, group: 'Trabalho' },
-  { id: 'mcp', label: 'MCP', icon: Server, group: 'Trabalho' },
-  { id: 'sap-context', label: 'Computer use · SAP', icon: Monitor, group: 'Trabalho' },
+  { id: 'mcp', label: 'Integrações', icon: Server, group: 'Trabalho' },
   { id: 'parametros', label: 'Parâmetros', icon: SlidersHorizontal, group: 'Trabalho' },
   { id: 'clients', label: 'Clientes', icon: Building2, group: 'Workspace' },
   { id: 'embeddings', label: 'Embeddings', icon: Database, group: 'Workspace' },
@@ -55,12 +51,14 @@ const SECTIONS: { id: SectionId; label: string; icon: typeof Palette; group: str
 
 interface SettingsModalProps {
   open: boolean
+  initialSection?: 'mcp'
   onClose: () => void
   onOpenClients: () => void
 }
 
 export function SettingsModal({
   open,
+  initialSection,
   onClose,
   onOpenClients
 }: SettingsModalProps): JSX.Element | null {
@@ -69,10 +67,11 @@ export function SettingsModal({
   const refreshRole = useAuthStore((state) => state.refreshRole)
   const canManageCatalog = role === 'MASTER' || role === 'ADMIN'
   const [query, setQuery] = useState('')
+  useEffect(() => { if (open && initialSection) { setActiveSection(initialSection); setQuery('') } }, [open, initialSection])
   const visibleSections = SECTIONS.filter(
     (section) =>
       (section.id !== 'embeddings' || canManageCatalog) &&
-      `${section.label} ${section.group} ${section.id === 'embeddings' ? 'catálogo SAP BAdI BAPI indexação' : ''}`
+      `${section.label} ${section.group} ${section.id === 'mcp' ? 'SAP ADT MCP conexões agentes' : ''} ${section.id === 'embeddings' ? 'catálogo SAP BAdI BAPI indexação' : ''}`
         .toLocaleLowerCase('pt-BR')
         .includes(query.trim().toLocaleLowerCase('pt-BR'))
   )
@@ -155,8 +154,7 @@ export function SettingsModal({
               <CatalogAdministration />
             </div>
           )}
-          {activeSection === 'mcp' && <McpSection />}
-          {activeSection === 'sap-context' && <SapContextSection />}
+          {activeSection === 'mcp' && <IntegrationsSection />}
           {activeSection === 'parametros' && <ParametrosSection />}
           {activeSection === 'clients' && (
             <div className="settings-section">

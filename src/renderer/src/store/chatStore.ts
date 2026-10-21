@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { supabase } from '@renderer/lib/supabaseClient'
 import { useAuthStore } from '@renderer/store/authStore'
+import type { OwnerFilter } from '@renderer/lib/contentOwnership'
 import type { AgentSource } from '@renderer/store/agentsStore'
 import type { EfDocumentJob } from '@renderer/lib/efDrive'
 import type { LocalSearchActivity } from '../../../shared/localFeatures'
@@ -113,6 +114,7 @@ interface CreateProjectInput {
 }
 
 interface ChatState {
+  error: string | null
   loaded: boolean
   recentChats: ChatSummary[]
   projects: ProjectSummary[]
@@ -120,6 +122,7 @@ interface ChatState {
   load: () => Promise<void>
   loadProjectChats: (projectId: string) => Promise<void>
   createProject: (input: CreateProjectInput) => Promise<ProjectSummary | null>
+  deleteProject: (projectId: string) => Promise<void>
   createChat: (input: CreateChatInput) => Promise<string | null>
   loadChatMeta: (chatId: string) => Promise<ChatMeta | null>
   loadChatMessages: (chatId: string) => Promise<PersistedMessage[]>
@@ -157,7 +160,23 @@ function toChatSummary(row: {
   }
 }
 
+export async function loadModuleChatPage(clientId: string, moduleId: string, offset = 0, owner: OwnerFilter = 'all'): Promise<{ chats: ChatSummary[]; hasMore: boolean }> {
+  const userId = currentUserId()
+  if (!userId) throw new Error('Entre novamente para carregar os chats.')
+  let query = supabase.from('chats').select('id, title, project_id, agent_name, updated_at, client_id, module_id, user_id')
+    .eq('archived', false).eq('client_id', clientId).eq('module_id', moduleId)
+  if (owner === 'mine') query = query.eq('user_id', userId)
+  else if (owner === 'team') query = query.neq('user_id', userId)
+  else if (owner === 'unknown') query = query.is('user_id', null)
+  else if (owner.startsWith('user:')) query = query.eq('user_id', owner.slice(5))
+  const { data, error } = await query.order('updated_at', { ascending: false }).order('id').range(offset, offset + 50)
+  if (currentUserId() !== userId) throw new Error('A conta mudou durante o carregamento.')
+  if (error) throw error
+  return { chats: (data ?? []).slice(0, 50).map(toChatSummary), hasMore: (data?.length ?? 0) > 50 }
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
+  error: null,
   loaded: false,
   recentChats: [],
   projects: [],
@@ -167,23 +186,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const userId = currentUserId()
     if (!userId) return
 
-    const [{ data: chatRows }, { data: projectRows }] = await Promise.all([
+    const [{ data: ownRows, error: ownError }, { data: teamRows, error: teamError }, { data: projectRows }] = await Promise.all([
       supabase
         .from('chats')
         .select('id, title, project_id, agent_name, updated_at, client_id, module_id, user_id')
         .eq('archived', false)
         .is('project_id', null)
+        .eq('user_id', userId)
         .order('updated_at', { ascending: false })
         .limit(30),
+      supabase.from('chats')
+        .select('id, title, project_id, agent_name, updated_at, client_id, module_id, user_id')
+        .eq('archived', false).is('project_id', null).neq('user_id', userId)
+        .order('updated_at', { ascending: false }).limit(30),
       supabase
         .from('projects')
         .select('*')
         .order('updated_at', { ascending: false })
     ])
 
+    if (currentUserId() !== userId) return
+    if (ownError || teamError) { set({ error: (ownError ?? teamError)?.message ?? 'Falha ao carregar chats.' }); return }
+    const chatRows = [...(ownRows ?? []), ...(teamRows ?? [])].sort((a,b) => b.updated_at.localeCompare(a.updated_at))
     set({
+      error: null,
       loaded: true,
-      recentChats: (chatRows ?? []).map(toChatSummary),
+      recentChats: chatRows.map(toChatSummary),
       projects: (projectRows ?? []).map((row) => ({
         id: row.id,
         name: row.name,
@@ -209,6 +237,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       .eq('project_id', projectId)
       .order('updated_at', { ascending: false })
 
+    if (currentUserId() !== userId || !get().projects.some(project => project.id === projectId)) return
     set((state) => ({
       projectChats: { ...state.projectChats, [projectId]: (data ?? []).map(toChatSummary) }
     }))
@@ -248,6 +277,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     set((state) => ({ projects: [project, ...state.projects] }))
     return project
+  },
+
+  deleteProject: async (projectId) => {
+    const userId = currentUserId()
+    if (!userId) throw new Error('Sua sessão expirou. Entre novamente para excluir o projeto.')
+    const { data, error } = await supabase.from('projects').delete().eq('id', projectId).select('id').single()
+    if (error) throw new Error(error.code === 'PGRST116' ? 'Projeto não encontrado ou exclusão não autorizada.' : error.message)
+    if (!data || data.id !== projectId) throw new Error('O servidor não confirmou a exclusão do projeto.')
+    if (currentUserId() !== userId) return
+    set(state => {
+      const restored = (state.projectChats[projectId] ?? []).map(chat => ({ ...chat, projectId: null }))
+      const projectChats = { ...state.projectChats }
+      delete projectChats[projectId]
+      const chats = [...restored, ...state.recentChats].filter((chat, index, all) => all.findIndex(item => item.id === chat.id) === index)
+      return { projects: state.projects.filter(project => project.id !== projectId), projectChats,
+        recentChats: chats.sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)) }
+    })
+    // Refresh detached chats without replaying a deletion if refresh fails.
+    try { await get().load() } catch { if (currentUserId() === userId) set({ error: 'Projeto excluído. Não foi possível atualizar os chats; tente atualizar a lista.' }) }
   },
 
   createChat: async (input) => {
@@ -471,5 +519,5 @@ export const useChatStore = create<ChatState>((set, get) => ({
     return true
   },
 
-  reset: () => set({ loaded: false, recentChats: [], projects: [], projectChats: {} })
+  reset: () => set({ error: null, loaded: false, recentChats: [], projects: [], projectChats: {} })
 }))

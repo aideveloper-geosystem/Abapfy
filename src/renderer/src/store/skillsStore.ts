@@ -70,7 +70,7 @@ function mergeCatalogWithRows(rows: SkillRow[]): SkillItem[] {
   })
 
   const customItems: SkillItem[] = rows
-    .filter((row) => !row.is_builtin)
+    .filter((row) => !row.is_builtin && row.slug !== 'sap-gui-context')
     .map((row) => ({
       id: row.id,
       slug: row.slug,

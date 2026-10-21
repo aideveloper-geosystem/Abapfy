@@ -1,0 +1,56 @@
+.sap-connection-picker {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  position: relative;
+}
+.sap-connection-picker select {
+  width: auto;
+  max-width: 240px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 8px;
+  background: var(--color-surface-1);
+  color: var(--color-ink-tertiary);
+  font: inherit;
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+.sap-connection-picker select.sap-connection-active {
+  color: var(--color-ink);
+  border-color: var(--color-primary);
+}
+.sap-connection-picker button {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px;
+  border-radius: 6px;
+  color: var(--color-ink-tertiary);
+}
+.sap-connection-picker button:hover {
+  background: var(--color-surface-2);
+  color: var(--color-ink);
+}
+.sap-connection-picker :disabled {
+  opacity: 0.5;
+}
+.sap-connection-error {
+  position: absolute;
+  bottom: 100%;
+  font-size: 11px;
+  color: var(--color-danger, #ef7070);
+  white-space: nowrap;
+}
+@media (max-width: 650px) {
+  .sap-connection-picker select {
+    max-width: 150px;
+    font-size: 11px;
+  }
+}
+@media (max-width: 480px) {
+  .sap-connection-picker select {
+    max-width: 115px;
+  }
+}

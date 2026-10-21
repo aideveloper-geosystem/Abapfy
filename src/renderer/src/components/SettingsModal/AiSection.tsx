@@ -105,7 +105,7 @@ export function AiSection(): JSX.Element {
   return <div className="settings-section settings-section-ai">
     <header className="settings-section-header">
       <h2>Inteligência Artificial</h2>
-      <p>Provedores, modelo padrão, como o Claude raciocina e quais ferramentas pagas ele pode usar. Integrações MCP ficam na aba MCP.</p>
+      <p>Provedores, modelo padrão, como o Claude raciocina e quais ferramentas pagas ele pode usar. Conexões SAP e servidores MCP ficam em Integrações.</p>
     </header>
     <div className="ai-summary">
       <div className="ai-summary-tile">

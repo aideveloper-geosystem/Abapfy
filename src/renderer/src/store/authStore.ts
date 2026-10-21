@@ -55,6 +55,9 @@ let authListenerRegistered = false
 
 async function applySession(session: Session | null): Promise<void> {
   const version = ++sessionVersion
+  if (!session?.user || useAuthStore.getState().user?.id !== session.user.id) {
+    void window.api.sapAdt?.closeAll().catch(() => undefined)
+  }
   if (!session?.user) {
     useAuthStore.setState({
       status: 'unauthenticated',

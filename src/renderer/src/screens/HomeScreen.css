@@ -356,54 +356,18 @@
 .home-composer-input { padding: 6px 4px; min-height: 40px; }
 .home-composer-toolbar .home-composer-send { width: 30px; height: 30px; flex-shrink: 0; }
 .home-composer-toolbar .home-composer-icon-btn { width: 30px; height: 30px; flex-shrink: 0; }
-.home-composer-toolbar .home-sap-switch { padding: 5px 7px; font-size: 11px; }
+
 .home-composer-toolbar .home-model-trigger { max-width: 240px; }
 .home-composer-toolbar .home-model-select { min-width: 0; }
 .home-composer-toolbar .home-model-trigger { min-width: 0; width: 100%; padding: 5px 8px; }
 .home-composer-toolbar .home-model-trigger > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .home-composer-toolbar .home-model-trigger > svg { flex-shrink: 0; }
 @media (max-width: 650px) { .home-composer-context-row .home-agent-trigger { max-width: 190px; } .home-composer-toolbar .home-model-trigger { max-width: 180px; font-size: 11px; } }
-@media (max-width: 480px) { .home-composer-context-row { flex-wrap: wrap; } .home-composer-context-row .home-environment-select { margin-left: 0; } .home-composer-toolbar .home-model-trigger { max-width: 140px; } .home-composer-toolbar .home-sap-switch { padding: 5px; font-size: 10px; } }
+@media (max-width: 480px) { .home-composer-context-row { flex-wrap: wrap; } .home-composer-context-row .home-environment-select { margin-left: 0; } .home-composer-toolbar .home-model-trigger { max-width: 140px; }  }
 
 .home-composer-spacer {
   flex: 1;
 }
-
-.home-sap-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  flex-shrink: 0;
-  border: 1px solid var(--color-hairline);
-  border-radius: 8px;
-  padding: 8px;
-  background: transparent;
-  color: var(--color-ink-tertiary);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.home-sap-switch-active { color: var(--color-ink); }
-.home-sap-switch:disabled { opacity: .5; cursor: default; }
-.home-sap-switch-track {
-  display: inline-flex;
-  align-items: center;
-  width: 26px;
-  height: 16px;
-  padding: 2px;
-  border-radius: 10px;
-  background: var(--color-ink-tertiary);
-}
-.home-sap-switch-track > span {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--color-surface-1);
-  transition: transform .15s;
-}
-.home-sap-switch-active .home-sap-switch-track { background: var(--color-primary); }
-.home-sap-switch-active .home-sap-switch-track > span { transform: translateX(10px); }
 
 .home-composer-icon-btn {
   display: inline-flex;
