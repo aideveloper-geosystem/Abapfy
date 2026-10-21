@@ -4,10 +4,18 @@ on:
   push:
     tags:
       - 'v*.*.*'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag existente a publicar (ex.: v1.0.7); vazio apenas compila a branch'
+        required: false
+        type: string
 
 permissions:
   contents: write
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
 jobs:
   build:
@@ -18,7 +26,7 @@ jobs:
           - os: windows-latest
             build-flag: --win
             artifact: windows
-          - os: macos-latest
+          - os: macos-15-intel
             build-flag: --mac --universal
             artifact: macos
           - os: ubuntu-latest
@@ -28,6 +36,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+
+      - name: Validate manual release tag
+        if: inputs.release_tag != ''
+        shell: bash
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Tag de release inválida'; exit 1; }
+          git describe --tags --exact-match HEAD | grep -Fx -- "$RELEASE_TAG"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -104,11 +121,13 @@ jobs:
 
   release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Download installers
         uses: actions/download-artifact@v4
@@ -128,7 +147,7 @@ jobs:
 
       - name: Prepare release notes
         run: |
-          awk -v heading="## [${GITHUB_REF_NAME#v}]" '
+          awk -v heading="## [${RELEASE_TAG#v}]" '
             index($0, heading) == 1 { in_section = 1; print; next }
             in_section && /^## \[/ { exit }
             in_section { print }
@@ -139,7 +158,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$RELEASE_TAG" \
             release-assets/release-windows/*.exe \
             release-assets/release-windows/*.exe.blockmap \
             release-assets/release-windows/latest.yml \
@@ -152,5 +171,5 @@ jobs:
             release-assets/release-linux/latest-linux.yml \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
-            --title "Abapfy $GITHUB_REF_NAME" \
+            --title "Abapfy $RELEASE_TAG" \
             --notes-file release-notes.md
