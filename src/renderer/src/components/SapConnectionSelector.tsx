@@ -15,7 +15,8 @@ export function SapConnectionSelector({
   onChange,
   refreshKey,
   disabled,
-  onManage
+  onManage,
+  onConnectionChange
 }: {
   userId?: string
   value: SapSelection | null
@@ -23,6 +24,7 @@ export function SapConnectionSelector({
   refreshKey: boolean
   disabled: boolean
   onManage: () => void
+  onConnectionChange?: (connection: SapAdtConnectionView | null) => void
 }): JSX.Element {
   const [rows, setRows] = useState<SapAdtConnectionView[]>([])
   const [loading, setLoading] = useState(false)
@@ -78,6 +80,9 @@ export function SapConnectionSelector({
     }
   }, [userId, refreshKey])
   const selected = value && value.userId === userId ? value.connectionId : ''
+  useEffect(() => {
+    onConnectionChange?.(rows.find((row) => row.id === selected && row.enabled && row.hasPassword) ?? null)
+  }, [rows, selected, onConnectionChange])
   return (
     <div className="sap-connection-picker">
       <select

@@ -20,6 +20,18 @@ Não gere ef-docx junto da pergunta. Depois da escolha, use o contexto original 
 
 Em todos os tipos separe fatos, premissas e A CONFIRMAR. A completude depende dos requisitos fornecidos; não invente dados para preencher o modelo.
 
+## Template guiado e identidade visual
+
+Nos três níveis, distribua o conteúdo nas seções do modelo do cliente. Preencha os slots [[EF:...]] com os textos correspondentes, substituindo o marcador e o resumo de instruções por conteúdo final. Contexto descreve a situação atual; objetivos descrevem o resultado esperado; processo contém a visão macro; escopo contém regras e detalhes na profundidade escolhida; aceite traz testes verificáveis; riscos contém dependências e pendências. Não concentre toda a EF em escopo nem repita o mesmo texto em cada seção.
+
+Use text para dados curtos e blocks para narrativas, tabelas e fluxos. A aplicação herda a tipografia, as cores, o preenchimento das tabelas e a largura do espaço do modelo. Não envie cores, fontes, HTML ou XML. Preserve rótulos, cabeçalhos, logotipos e aprovações. Não mantenha textos, datas ou horas da demanda usada como exemplo no template. Campos institucionais de assinatura e aprovação permanecem em branco quando não houver aprovação real.
+
+## Estimativa com parâmetros do cliente
+
+Inclua estimate no ef-docx conforme o contrato de parâmetros fornecido nesta solicitação. Identifique objetos distintos sustentados pelo escopo, tipo/operação, complexidade e justificativa; use valores exatos das linhas cadastradas. Não equipare Simples/Técnica/Avançada a baixa/média/alta complexidade. Não invente objetos, parâmetros, horas, taxas ou custos.
+
+As horas são calculadas pelo aplicativo com a mesma função do Estimador de Esforço, usando os fatores do cliente selecionado e os cenários agressiva, segura e tranquila. Slots estimate_functional, estimate_development, estimate_objects e estimate_summary são preenchidos pelo aplicativo e não devem constar em template_edits. Se os parâmetros ou objetos estiverem ausentes, a estimativa deve ficar explicitamente pendente; continue preenchendo as demais seções da EF com os dados disponíveis, sem fabricar totais. Testes integrados, homologação, GMUD, gestão e demais fases sem horas-base não entram no total calculado.
+
 ## Preenchimento do Word
 
 Leia todo o modelo do cliente e preencha cada campo aplicável: identificação, versão, autor, cliente, módulo, título, descrição, equipe, escopo, motivo da mudança, pré-requisitos, riscos, macro, micro e critérios de aceite. Não se limite a macro e micro. Preserve rótulos, títulos institucionais, assinaturas e aprovações reais; não simule aprovação. Não apague dados institucionais confirmados. Campos desconhecidos ficam A CONFIRMAR; campos realmente não aplicáveis recebem Não se aplica com justificativa curta. Remova instruções de preenchimento dos campos editáveis. Nunca altere sumário, imagens ou campos automáticos.

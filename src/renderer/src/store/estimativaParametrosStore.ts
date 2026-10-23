@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { supabase } from '@renderer/lib/supabaseClient'
 import { useAuthStore } from '@renderer/store/authStore'
+import type { EfEstimateParameters } from '../lib/efEstimate'
 
 export interface EstimativaParametro {
   id: string
@@ -323,4 +324,22 @@ export async function fetchParametrosContextBlock(userId: string): Promise<strin
     '## Tabela de Parâmetros de Cliente',
     clienteTable
   ].join('\n')
+}
+
+/** Capture the same hours/factors used by the estimator, scoped to this EF client. */
+export async function fetchEfEstimateParameters(userId: string, clientName: string): Promise<EfEstimateParameters> {
+  const capturedAt = new Date().toISOString()
+  if (currentUserId() !== userId) throw new Error('A sessão mudou antes de consultar os parâmetros da EF.')
+  const [hours, factors] = await Promise.all([
+    supabase.from('estimativa_parametros').select('*').eq('user_id', userId),
+    supabase.from('cliente_parametros_compartilhados').select('*')
+  ])
+  if (currentUserId() !== userId) throw new Error('A sessão mudou durante a consulta dos parâmetros da EF.')
+  const normalizeName = (value: string): string => value.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR')
+  return {
+    capturedAt,
+    parameters: (hours.data ?? []).map(mapEstimativaRow),
+    clients: (factors.data ?? []).map(mapClienteRow).filter((client) => normalizeName(client.empresa) === normalizeName(clientName)),
+    ...(hours.error || factors.error ? { error: 'Não foi possível consultar os parâmetros atuais da estimativa. Revise Configurações > Parâmetros e tente novamente.' } : {})
+  }
 }

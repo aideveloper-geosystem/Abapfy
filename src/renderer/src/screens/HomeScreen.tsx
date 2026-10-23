@@ -25,8 +25,10 @@ import { WindowsDictationButton } from '@renderer/components/WindowsDictationBut
 import { useLocalFeaturesStore } from '@renderer/store/localFeaturesStore'
 import { localSearchEvidence } from '@renderer/lib/localEnhancementSearch'
 import { prepareContext } from '@renderer/lib/prepareContext'
-import { compactionBoundary, contextTokens, estimateTokens, restoredContext, validSnapshot } from '@renderer/lib/contextCompactor'
+import { compactionBoundary, contextTokens, restoredContext, validSnapshot } from '@renderer/lib/contextCompactor'
 import { useContextStore } from '@renderer/store/contextStore'
+import { sessionContextUsage } from '@renderer/lib/sessionContextUsage'
+import type { SapAdtConnectionView } from '../../../shared/sapAdt'
 import { ContextMeter } from '@renderer/components/ContextMeter'
 import { DEFAULT_COMPACTION } from '../../../shared/compaction'
 import { SettingsModal } from '@renderer/components/SettingsModal/SettingsModal'
@@ -59,7 +61,8 @@ import { presenceLabel, useWorkPresence, type WorkScope } from '@renderer/lib/wo
 import { useChatRuntimeStore } from '@renderer/store/chatRuntimeStore'
 import { useSkillsStore } from '@renderer/store/skillsStore'
 import { useMcpStore } from '@renderer/store/mcpStore'
-import { fetchParametrosContextBlock } from '@renderer/store/estimativaParametrosStore'
+import { fetchParametrosContextBlock, fetchEfEstimateParameters } from '@renderer/store/estimativaParametrosStore'
+import { calculateEfEstimate, efEstimatePrompt, type EfEstimateParameters } from '@renderer/lib/efEstimate'
 import { parseClarify } from '@renderer/lib/clarify'
 import { EF_DOCX_OUTPUT_CONTRACT, parseEfDocxResponse, efDocxFileName } from '@renderer/lib/efDocx'
 import { prepareClientEfTemplate, completeEfDocument, openSavedEf, type PreparedEfTemplate, type EfDocumentJob } from '@renderer/lib/efDrive'
@@ -150,6 +153,7 @@ export function HomeScreen(): JSX.Element {
   const [shortcutsDismissed, setShortcutsDismissed] = useState(false)
   const [shortcutIndex, setShortcutIndex] = useState(0)
   const [sapSelection, setSapSelection] = useState<SapSelection | null>(null)
+  const [sapConnectionView, setSapConnectionView] = useState<SapAdtConnectionView | null>(null)
   const composerInputRef = useRef<HTMLTextAreaElement>(null)
   const [draftMessages, setDraftMessages] = useState<UiMessage[]>([])
   const [isRouting, setIsRouting] = useState(false)
@@ -350,10 +354,11 @@ export function HomeScreen(): JSX.Element {
     }).catch((error: Error) => { if (active) useContextStore.getState().update(contextKey, { error: error.message }) })
     return () => { active = false }
   }, [contextKey, currentChatId, messages, isStreaming, user, compactionSettings.recentTurns])
-  const contextUsed = useMemo(() => {
+  const contextRows = useMemo(() => {
     const turns = messages.filter((message) => !message.error && message.content.trim()).map(({ role, content, imageDataUrls }) => ({ role, content, imageDataUrls }))
-    return contextTokens(restoredContext(turns, contextState?.snapshot ?? null, input)) + (contextState?.systemTokens ?? estimateTokens(systemPrompt ?? '')) + estimateTokens(input) + attachments.reduce((total, attachment) => total + estimateTokens(attachment.content ?? '') + (attachment.imageDataUrl ? 4096 : 0), 0)
-  }, [messages, contextState?.snapshot, contextState?.systemTokens, systemPrompt, input, attachments])
+    return sessionContextUsage({ messages: restoredContext(turns, contextState?.snapshot ?? null, input), basePrompt: systemPrompt ?? '', preparedPrompt: contextState?.preparedPrompt, driveContext: contextState?.driveContext, draft: input, attachments })
+  }, [messages, contextState?.snapshot, contextState?.preparedPrompt, contextState?.driveContext, systemPrompt, input, attachments])
+  const contextUsed = contextRows.reduce((sum, row) => sum + row.tokens, 0)
 
   async function authorizeCompactionRouter(userId: string): Promise<string> {
     if (useAuthStore.getState().user?.id !== userId) throw new DOMException('Conta alterada', 'AbortError')
@@ -919,6 +924,7 @@ export function HomeScreen(): JSX.Element {
       }
     }
     let preparedEfTemplate: PreparedEfTemplate | undefined
+    let efEstimateParameters: EfEstimateParameters | undefined
     if (agent?.source === 'default' && agent.id === 'enhancement_finder' && user?.id) {
       const step: ToolActivityItem = { id: 'local-enhancements', label: 'Consultando catálogo SAP local', kind: 'local', status: 'running' }
       toolActivity.push(step); pushToolActivity()
@@ -977,11 +983,13 @@ export function HomeScreen(): JSX.Element {
         toolActivity.push(step)
         pushToolActivity()
         preparedEfTemplate = await prepareClientEfTemplate(currentClientId)
+        efEstimateParameters = await fetchEfEstimateParameters(user.id, selectedClient?.name ?? '')
         if (controller.signal.aborted) throw new DOMException('Solicitação cancelada', 'AbortError')
         step.label = preparedEfTemplate.label
         step.status = 'done'
         pushToolActivity()
         if (preparedEfTemplate.snapshot) runtimePrompt = `${runtimePrompt ?? ''}\n\n${efTemplatePrompt(preparedEfTemplate.snapshot, preparedEfTemplate.label)}`
+        runtimePrompt = `${runtimePrompt ?? ''}\n\n${efEstimatePrompt(efEstimateParameters, selectedClient?.name ?? '')}\n\n## Identificação atual da EF\nCliente: ${JSON.stringify(selectedClient?.name ?? 'A CONFIRMAR')}; módulo selecionado: ${JSON.stringify(modules.find((module) => module.id === currentModuleId)?.name ?? 'A CONFIRMAR')}; consultor autenticado: ${JSON.stringify(profile?.nome ?? 'A CONFIRMAR')}; data de emissão: ${new Date().toLocaleDateString('pt-BR')}. Use esses dados nos campos correspondentes. Não confunda data de emissão com data de solicitação ou aprovação.`
       }
       if (agent) {
         const mcpServers = configsForAgent(agent.source, agent.id)
@@ -1112,8 +1120,10 @@ export function HomeScreen(): JSX.Element {
         ? parseEfDocxResponse(accumulated, !preparedEfTemplate?.snapshot)
         : null
       if (efData && preparedEfTemplate) {
+        const estimate = calculateEfEstimate(efData.estimate, selectedClient?.name ?? efData.client_name, efEstimateParameters ?? { parameters: [], clients: [], capturedAt: new Date().toISOString(), error: 'Os parâmetros desta solicitação não foram carregados.' })
         const destinationLabel = `${selectedClient?.name ?? 'Cliente'} / ${modules.find((module) => module.id === currentModuleId)?.name ?? 'Módulo'}${selectedFolderId ? ` / ${folderPath(selectedFolderId, driveFolders)}` : ''}`
-        const job: EfDocumentJob = { fileId: crypto.randomUUID(), clientId: currentClientId, moduleId: currentModuleId, folderId: selectedFolderId, userId: user.id, destinationLabel, templateFileId: preparedEfTemplate.fileId, templateLabel: preparedEfTemplate.label, templateRevision: preparedEfTemplate.snapshot?.revision, fileName: efDocxFileName(efData), state: 'pending' }
+        const job: EfDocumentJob = { fileId: crypto.randomUUID(), clientId: currentClientId, moduleId: currentModuleId, folderId: selectedFolderId, userId: user.id, destinationLabel, templateFileId: preparedEfTemplate.fileId, templateLabel: preparedEfTemplate.label, templateRevision: preparedEfTemplate.snapshot?.revision, fileName: efDocxFileName(efData), state: 'pending', estimate,
+          identity: { author: profile?.nome ?? 'A CONFIRMAR', clientName: selectedClient?.name ?? 'A CONFIRMAR', module: modules.find((module) => module.id === currentModuleId)?.name ?? 'A CONFIRMAR', issueDate: new Date().toLocaleDateString('pt-BR') } }
         const step: ToolActivityItem = { id: 'ef-output', label: 'Gerando e salvando EF no drive', kind: 'document', status: 'running', efDocument: job }
         toolActivity.push(step)
         pushToolActivity()
@@ -1294,6 +1304,7 @@ export function HomeScreen(): JSX.Element {
             type="button"
             className={`home-session-context-trigger ${sessionPanelOpen ? 'home-session-context-trigger-active' : ''}`}
             title="Contexto da sessão"
+            aria-expanded={sessionPanelOpen}
             onClick={() => setSessionPanelOpen((open) => !open)}
           >
             <Layers3 size={15} strokeWidth={1.75} />
@@ -1311,6 +1322,15 @@ export function HomeScreen(): JSX.Element {
               skills={sessionSkillNames}
               mcps={sessionMcps}
               environment={selectedClient ? `${selectedClient.name} / ${selectedModule?.name ?? 'Módulo'}` : 'Nenhum cliente selecionado'}
+              sapConnection={sapSelection?.userId === user?.id && sapSelection?.connectionId === sapConnectionView?.id ? sapConnectionView : null}
+              usage={contextRows}
+              budget={compactionSettings.inputBudget}
+              covered={contextState?.snapshot?.coveredCount ?? 0}
+              contextDetail={contextState?.detail}
+              contextError={contextState?.error}
+              compacting={contextState?.phase === 'compacting'}
+              compactDisabled={!currentChatId || isStreaming}
+              onCompact={() => void handleCompact()}
               onClose={() => setSessionPanelOpen(false)}
             />
           )}
@@ -1558,7 +1578,7 @@ export function HomeScreen(): JSX.Element {
               <ContextMeter used={contextUsed} settings={compactionSettings} phase={contextState?.phase ?? 'idle'} detail={contextState?.detail ?? ''} error={contextState?.error} covered={contextState?.snapshot?.coveredCount ?? 0} disabled={!currentChatId || isStreaming} onCompact={() => void handleCompact()} />
               <div className="home-composer-spacer" />
 
-              <SapConnectionSelector userId={user?.id} value={sapSelection} onChange={setSapSelection} refreshKey={settingsOpen} disabled={isRouting || isStreaming} onManage={() => { setSettingsSection('mcp'); setSettingsOpen(true) }} />
+              <SapConnectionSelector userId={user?.id} value={sapSelection} onChange={setSapSelection} onConnectionChange={setSapConnectionView} refreshKey={settingsOpen} disabled={isRouting || isStreaming} onManage={() => { setSettingsSection('mcp'); setSettingsOpen(true) }} />
 
               <div className="home-model-select" ref={modelMenuRef}>
                 {modelChoiceError && <span role="alert" title={modelChoiceError} className="home-model-error">{modelChoiceError}</span>}

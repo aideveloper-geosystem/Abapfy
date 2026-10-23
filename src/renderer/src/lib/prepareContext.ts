@@ -62,6 +62,10 @@ export async function prepareContext(args: {
       snapshot: previous,
       usedTokens: before,
       systemTokens: estimateTokens(args.prompt),
+      preparedPrompt: args.prompt,
+      driveContext: original
+        .flatMap((turn) => turn.content.match(/<contexto-drive>[\s\S]*?<\/contexto-drive>/g) ?? [])
+        .join('\n'),
       error: null
     })
     const due =
@@ -129,7 +133,12 @@ export async function prepareContext(args: {
     checkAccount()
     args.signal.throwIfAborted()
     await window.api.localFeatures.saveContext(args.userId, args.chatId, snapshot)
-    state.update(key, { snapshot, usedTokens: snapshot.afterTokens, error: null })
+    state.update(key, {
+      snapshot, usedTokens: snapshot.afterTokens, error: null,
+      driveContext: messages
+        .flatMap((turn) => turn.content.match(/<contexto-drive>[\s\S]*?<\/contexto-drive>/g) ?? [])
+        .join('\n')
+    })
     return { messages, snapshot, changed: true }
   } catch (error) {
     if (args.signal.aborted || (error as Error).name === 'AbortError') throw error

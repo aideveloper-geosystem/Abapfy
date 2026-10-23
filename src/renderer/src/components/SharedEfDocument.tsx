@@ -94,6 +94,7 @@ export function SharedEfDocument({
           {current.fileName} · {current.destinationLabel}
         </span>
         <span className="ef-docx-subtitle">Modelo: {current.templateLabel}</span>
+        {current.estimate && <span className="ef-docx-subtitle">{current.estimate.status === 'calculated' ? 'Estimativa calculada com os parâmetros do cliente.' : 'Estimativa pendente: confira os parâmetros e objetos indicados no Word.'}</span>}
         {error && (
           <span role="alert" className="ef-docx-error-detail">
             {error}

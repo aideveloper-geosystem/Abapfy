@@ -1,4 +1,5 @@
 import { applyEfTemplateEdits, type EfTemplateEdit, type EfTemplateSnapshot } from './efTemplate'
+import { efEstimateBlocks, type EfCalculatedEstimate, type EfEstimateInput } from './efEstimate'
 
 export interface EfDocxData {
   specification_type?: 'simples' | 'tecnica' | 'avancada'
@@ -12,6 +13,13 @@ export interface EfDocxData {
   functional_spec: string
   template_revision?: string
   template_edits?: EfTemplateEdit[]
+  estimate?: EfEstimateInput
+}
+export interface EfDocumentIdentity {
+  author: string
+  clientName: string
+  module: string
+  issueDate: string
 }
 
 export const EF_DOCX_OUTPUT_CONTRACT = `## Contrato de saída do documento EF
@@ -50,7 +58,8 @@ function normalizeParsedData(parsed: unknown): EfDocxData | null {
 
   return {
     ...(['simples', 'tecnica', 'avancada'].includes(record.specification_type as string)
-      ? { specification_type: record.specification_type as EfDocxData['specification_type'] } : {}),
+      ? { specification_type: record.specification_type as EfDocxData['specification_type'] }
+      : {}),
     project_name: record.project_name.trim(),
     author: field(record.author, 'A CONFIRMAR'),
     client_name: field(record.client_name, 'A CONFIRMAR'),
@@ -59,8 +68,15 @@ function normalizeParsedData(parsed: unknown): EfDocxData | null {
     summary_description: field(record.summary_description, ''),
     macro_overview: field(record.macro_overview, ''),
     functional_spec: field(record.functional_spec, ''),
-    ...(typeof record.template_revision === 'string' ? { template_revision: record.template_revision } : {}),
-    ...(Array.isArray(record.template_edits) ? { template_edits: record.template_edits as EfTemplateEdit[] } : {})
+    ...(typeof record.template_revision === 'string'
+      ? { template_revision: record.template_revision }
+      : {}),
+    ...(Array.isArray(record.template_edits)
+      ? { template_edits: record.template_edits as EfTemplateEdit[] }
+      : {}),
+    ...(record.estimate && typeof record.estimate === 'object'
+      ? { estimate: record.estimate as EfEstimateInput }
+      : {})
   }
 }
 
@@ -119,19 +135,28 @@ export function isLegacyEfDocument(raw: string): boolean {
   // and multiple actual specification sections.
   const lines = raw.split(/\r?\n/).map(plainTextFromMarkdown)
   const section = (pattern: RegExp): boolean => lines.some((line) => pattern.test(line))
-  return section(/^Especificação Funcional\b/i) &&
+  return (
+    section(/^Especificação Funcional\b/i) &&
     section(/^(?:\d+[.)]?\s*)?Objetivo\s*:?$/i) &&
     section(/^(?:\d+[.)]?\s*)?Escopo\s*:?$/i) &&
     section(/^(?:\d+[.)]?\s*)?(?:Fluxo(?: do processo)?|Processo|Regras de negócio)\s*:?$/i)
+  )
 }
 
 function legacyMacroOverview(raw: string): string {
   const lines = raw.split(/\r?\n/)
-  const start = lines.findIndex((line) => /^(?:\d+[.)]?\s*)?(?:Visão geral|Visão macro|Visão geral do processo|Macro(?: overview|fluxo)?)\s*:?$/i.test(plainTextFromMarkdown(line)))
+  const start = lines.findIndex((line) =>
+    /^(?:\d+[.)]?\s*)?(?:Visão geral|Visão macro|Visão geral do processo|Macro(?: overview|fluxo)?)\s*:?$/i.test(
+      plainTextFromMarkdown(line)
+    )
+  )
   if (start < 0) return 'A CONFIRMAR'
   const remaining = lines.slice(start + 1)
   const next = remaining.findIndex((line) => /^#{1,6}\s|^\s*\d+[.)]\s/.test(line))
-  return plainTextFromMarkdown((next < 0 ? remaining : remaining.slice(0, next)).join('\n')) || 'A CONFIRMAR'
+  return (
+    plainTextFromMarkdown((next < 0 ? remaining : remaining.slice(0, next)).join('\n')) ||
+    'A CONFIRMAR'
+  )
 }
 
 /**
@@ -150,7 +175,9 @@ export function parseEfDocxResponse(raw: string, allowMarkdownFallback = false):
   const heading = raw.match(/^#\s+(.+)$/m)?.[1]?.trim()
   const projectName =
     labeledValue(raw, ['Nome do Projeto', 'Projeto', 'Título', 'Titulo']) ??
-    (heading ? plainTextFromMarkdown(heading).replace(/^Especificação Funcional\s*[-–—:]?\s*/i, '') : null) ??
+    (heading
+      ? plainTextFromMarkdown(heading).replace(/^Especificação Funcional\s*[-–—:]?\s*/i, '')
+      : null) ??
     'Especificação Funcional'
   const firstParagraph = functionalSpec.split(/\r?\n\s*\r?\n/).find((part) => part.trim()) ?? ''
 
@@ -170,17 +197,109 @@ function escapeRegex(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-export async function generateEfDocx(data: EfDocxData, clientTemplate?: EfTemplateSnapshot): Promise<Blob> {
-  if (!clientTemplate) throw new Error('O modelo EF deve ser carregado do drive: default.docx ou base.docx na raiz do módulo EFs do cliente. Gere uma nova EF para usar esse modelo.')
+export async function generateEfDocx(
+  data: EfDocxData,
+  clientTemplate?: EfTemplateSnapshot,
+  estimate?: EfCalculatedEstimate,
+  identity?: EfDocumentIdentity
+): Promise<Blob> {
+  if (!clientTemplate)
+    throw new Error(
+      'O modelo EF deve ser carregado do drive: default.docx ou base.docx na raiz do módulo EFs do cliente. Gere uma nova EF para usar esse modelo.'
+    )
+  if (
+    clientTemplate.paragraphs.some((paragraph) => paragraph.slot) &&
+    !['simples', 'tecnica', 'avancada'].includes(data.specification_type ?? '')
+  )
+    throw new Error(
+      'Escolha o tipo da EF: Técnica, Simples ou Avançada antes de gerar o documento.'
+    )
   const edits = data.template_edits?.map((edit) => ({ ...edit }))
+  if (edits) {
+    for (const paragraph of clientTemplate.paragraphs) {
+      if (!paragraph.editable || !paragraph.slot) continue
+      const slot = paragraph.slot
+      const existing = edits.findIndex((edit) => edit.paragraph_id === paragraph.id)
+      if (existing >= 0 && !slot.startsWith('estimate_')) {
+        const edit = edits[existing]
+        if (
+          (edit.text !== undefined && (typeof edit.text !== 'string' || !edit.text.trim())) ||
+          (edit.blocks !== undefined && !edit.blocks.length)
+        )
+          throw new Error(
+            `O campo ${slot} do modelo EF está vazio. Preencha o conteúdo ou indique A CONFIRMAR.`
+          )
+      }
+      const identityValues: Record<string, string | undefined> = {
+        author: identity?.author,
+        revision_author: identity?.author,
+        client_name: identity?.clientName,
+        module: identity?.module,
+        issue_date: identity?.issueDate,
+        revision_date: identity?.issueDate
+      }
+      if (identityValues[slot]) {
+        const edit = { paragraph_id: paragraph.id, text: identityValues[slot]! }
+        if (existing >= 0) edits[existing] = edit
+        else edits.push(edit)
+      } else if (slot.startsWith('estimate_')) {
+        const blocks = efEstimateBlocks(
+          estimate ?? {
+            status: 'pending',
+            clientName: data.client_name,
+            capturedAt: '',
+            reasons: ['Gere novamente a EF para consultar os parâmetros do cliente.']
+          },
+          slot
+        )
+        const edit = { paragraph_id: paragraph.id, blocks }
+        if (existing >= 0) edits[existing] = edit
+        else edits.push(edit)
+      } else if (existing < 0) {
+        const values: Record<string, string> = {
+          project_name: data.project_name,
+          author: data.author,
+          client_name: data.client_name,
+          module: data.module,
+          summary: data.summary_description,
+          description: data.brief_description
+        }
+        const fallback = values[slot]
+        if (fallback?.trim()) edits.push({ paragraph_id: paragraph.id, text: fallback.trim() })
+        else if (
+          [
+            'context',
+            'objectives',
+            'process',
+            'scope',
+            'out_of_scope',
+            'acceptance',
+            'risks'
+          ].includes(slot)
+        )
+          throw new Error(
+            `A seção ${slot} do modelo não foi preenchida. Gere novamente a EF com todas as seções organizadas.`
+          )
+        else edits.push({ paragraph_id: paragraph.id, text: 'A CONFIRMAR' })
+      }
+    }
+  }
   // Fill explicit project-name placeholders even when the model omits a copy
   // hidden in a cover/header text box. Never infer arbitrary institutional text.
   if (edits && data.project_name?.trim()) {
     for (const paragraph of clientTemplate.paragraphs) {
-      if (!paragraph.editable || !/^(?:INSIRA AQUI O NOME DO PROJETO|NOME DO PROJETO)$/i.test(paragraph.text.trim())) continue
+      if (
+        !paragraph.editable ||
+        !/^(?:INSIRA AQUI O NOME DO PROJETO|NOME DO PROJETO)$/i.test(paragraph.text.trim())
+      )
+        continue
       const existing = edits.find((edit) => edit.paragraph_id === paragraph.id)
       if (existing) {
-        if (existing.blocks === undefined && (!existing.text?.trim() || existing.text.trim() === paragraph.text.trim())) existing.text = data.project_name.trim()
+        if (
+          existing.blocks === undefined &&
+          (!existing.text?.trim() || existing.text.trim() === paragraph.text.trim())
+        )
+          existing.text = data.project_name.trim()
       } else edits.push({ paragraph_id: paragraph.id, text: data.project_name.trim() })
     }
   }

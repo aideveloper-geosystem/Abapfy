@@ -1,6 +1,7 @@
 import { supabase } from './supabaseClient'
-import { efDocxFileName, generateEfDocx, type EfDocxData } from './efDocx'
+import { efDocxFileName, generateEfDocx, type EfDocxData, type EfDocumentIdentity } from './efDocx'
 import { readEfTemplate, efDocxText, type EfTemplateSnapshot } from './efTemplate'
+import type { EfCalculatedEstimate } from './efEstimate'
 
 export interface PreparedEfTemplate {
   fileId: string | null
@@ -22,6 +23,8 @@ export interface EfDocumentJob {
   error?: string
   openError?: string
   outputDigest?: string
+  estimate?: EfCalculatedEstimate
+  identity?: EfDocumentIdentity
 }
 interface DriveFile {
   id: string
@@ -238,7 +241,7 @@ export async function completeEfDocument(
       if (!blob) {
         const template = prepared ?? (await templateForEfJob(job))
         signal?.throwIfAborted()
-        blob = await generateEfDocx(data, template.snapshot)
+        blob = await generateEfDocx(data, template.snapshot, job.estimate, job.identity)
       }
       current = { ...job, outputDigest: await blobDigest(blob) }
       await saveEfToDrive(

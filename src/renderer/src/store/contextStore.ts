@@ -7,6 +7,8 @@ export interface ContextState {
   detail: string
   usedTokens: number
   systemTokens: number
+  preparedPrompt?: string
+  driveContext?: string
   error: string | null
 }
 const empty: ContextState = {

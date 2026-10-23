@@ -6,6 +6,26 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-10-23
+
+### Especificações Funcionais
+
+- Modelo Word com campos guiados e instruções para preencher EFs Simples, Técnicas e Avançadas, preservando fontes, cores, tabelas, logotipo e layout do cliente. Template revisado disponível em `output/ef-template/default.docx` para substituição na pasta EF/EFs do cliente.
+- Conteúdo organizado por seção, com resumo, escopo, regras, critérios de aceite, testes, riscos, premissas e dependências. Autor autenticado, cliente, módulo e data de emissão preenchem os campos correspondentes.
+- Estimativas calculadas pela aplicação com a mesma lógica do agente de estimativa, usando os parâmetros do cliente e a classificação dos objetos da EF. Parâmetros ausentes ou ambíguos deixam a estimativa pendente, sem inventar horas.
+- Geração e novas tentativas preservam os parâmetros capturados e o destino selecionado no Drive. Corrigida a preservação das tabulações do modelo para manter o arquivo editável e compatível com o Word.
+
+### Contexto do chat
+
+- Painel com cartões expansíveis de Ambiente, Contexto e Conectores, incluindo a conexão SAP selecionada, detalhamento estimado do consumo de contexto, skills e MCPs vinculados à sessão.
+- Indicador de orçamento de contexto, informações de compactação e ação para compactar a conversa.
+- Workbook base da Farmativa documentado para SAP S/4HANA 2023 e ADT, com padrão de cabeçalho e boas práticas ABAP.
+
+### Publicação
+
+- Workflow incorpora a recuperação de releases por tag e usa runner macOS Intel para gerar os instaladores universais. Mantida uma única etapa de publicação após os builds das três plataformas.
+- Nenhuma nova migração de banco é necessária. O modelo Word dos clientes deve ser substituído para habilitar os novos campos guiados.
+
 ## [1.0.7] - 2026-10-21
 
 ### Integração SAP ADT
