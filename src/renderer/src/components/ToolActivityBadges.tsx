@@ -3,17 +3,25 @@ import { AiPresentation } from './AiPresentation'
 import type { ToolActivityItem } from './ChatMessageItem'
 import './AiInterface.css'
 import { RichText } from './RichText'
-export function ToolActivityBadges({ items }: { items: ToolActivityItem[] }): JSX.Element {
+export function ToolActivityBadges({
+  items,
+  interrupted = false
+}: {
+  items: ToolActivityItem[]
+  interrupted?: boolean
+}): JSX.Element {
   const sapItems = items.filter((item) => item.kind === 'sap')
   const activity = items.filter((item) => item.kind !== 'source')
-  const needsAttention = activity.some((item) => item.status !== 'done')
-  const status = activity.some((item) => item.status === 'confirm')
-    ? 'Aguardando autorização'
-    : activity.some((item) => item.status === 'running')
-      ? 'Em andamento'
-      : activity.some((item) => item.status === 'error')
-        ? 'Com interrupções'
-        : 'Concluída'
+  const needsAttention = interrupted || activity.some((item) => item.status !== 'done')
+  const status = interrupted
+    ? 'Interrompida'
+    : activity.some((item) => item.status === 'confirm')
+      ? 'Aguardando autorização'
+      : activity.some((item) => item.status === 'running')
+        ? 'Em andamento'
+        : activity.some((item) => item.status === 'error')
+          ? 'Com interrupções'
+          : 'Concluída'
   return (
     <details className="ai-tool-details" open={needsAttention || undefined}>
       <summary>
@@ -22,6 +30,84 @@ export function ToolActivityBadges({ items }: { items: ToolActivityItem[] }): JS
         {activity.some((item) => item.kind === 'local') && ' · Catálogo SAP local'}
       </summary>
       <div>
+        {items
+          .filter((item) => item.workProgress)
+          .map((item) => (
+            <details className="ai-tool-details work-progress-panel" key={item.id + '-progress'}>
+              <summary>
+                <FileText size={13} /> Progresso e pendências da tarefa
+              </summary>
+              <p>As fontes e permissões são conferidas novamente ao continuar.</p>
+              {item.workProgress!.notes && <RichText content={item.workProgress!.notes} />}
+              <div className="work-progress-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Arquivo / objeto</th>
+                      <th>Operação</th>
+                      <th>Resultado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {item.workProgress!.steps.slice(-25).map((step, index) => (
+                      <tr key={index}>
+                        <td>
+                          {step.label ?? step.target}
+                          {step.sourcePath && <small>{step.sourcePath}</small>}
+                        </td>
+                        <td>
+                          {(
+                            {
+                              read_file: 'Leitura',
+                              read_source: 'Leitura SAP',
+                              edit_source: 'Salvar inativo',
+                              preview_edits: 'Proposta',
+                              activate_object: 'Ativação',
+                              syntax_check: 'Sintaxe',
+                              pending: 'Continuação'
+                            } as Record<string, string>
+                          )[step.tool] ?? step.tool}
+                        </td>
+                        <td>
+                          {(
+                            {
+                              saved_inactive: 'Salvo inativo',
+                              proposed: 'Proposto',
+                              activated: 'Ativado',
+                              uncertain: 'Conferir no SAP',
+                              activation_not_verified: 'Ativação não confirmada',
+                              read_complete: 'Leitura completa',
+                              read_partial: 'Leitura parcial',
+                              pending: 'Pendente',
+                              done: 'Concluído',
+                              error: 'Erro',
+                              syntax_valid: 'Sintaxe válida',
+                              syntax_errors: 'Erros de sintaxe'
+                            } as Record<string, string>
+                          )[step.status] ?? step.status}
+                          {step.nextOffset != null && <small>Continuar em {step.nextOffset}</small>}
+                          {step.validation && (
+                            <small>
+                              {(
+                                {
+                                  syntax_valid: 'Sintaxe válida',
+                                  syntax_errors: 'Corrigir erros de sintaxe',
+                                  check_failed: 'Validação indisponível',
+                                  not_authorized: 'Validação sem permissão'
+                                } as Record<string, string>
+                              )[step.validation] ?? step.validation}
+                            </small>
+                          )}
+                          {step.error && <small>{step.error}</small>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          ))}
+
         {items
           .filter((item) => item.compaction)
           .map((item) => (

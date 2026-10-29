@@ -1,3 +1,4 @@
+import { sapSourceCatalog, selectSapSource, SapAdtSourceError } from './sapAdtSources'
 import { app, ipcMain, safeStorage, type BrowserWindow } from 'electron'
 import { randomUUID, createHash } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile, appendFile, stat } from 'node:fs/promises'
@@ -205,6 +206,11 @@ export function sapAdtTools(
           description: 'Padrão active; use inactive para revisar alterações pendentes.'
         },
         objectPath: { type: 'string', description: 'objectPath exato retornado pela pesquisa' },
+        sourcePath: {
+          type: 'string',
+          description:
+            'Opcional: fonte exata retornada por list_sources. Sem este campo, lê a principal.'
+        },
         offset: {
           type: 'integer',
           minimum: 0,
@@ -216,6 +222,16 @@ export function sapAdtTools(
           description:
             'Localiza texto literal a partir de offset, sem diferenciar maiúsculas. Ex.: METHOD z_get_table_hkont'
         }
+      },
+      ['objectPath']
+    )
+  if (connection.allowSource)
+    add(
+      'list_sources',
+      'Lista as fontes/includes do objeto pesquisado. Selecione sourcePath nos resultados para ler ou editar definições, implementações, macros e testes locais. Includes de programas separados devem ser pesquisados pelo nome.',
+      {
+        objectPath: { type: 'string' },
+        version: { type: 'string', enum: ['active', 'inactive'] }
       },
       ['objectPath']
     )
@@ -306,7 +322,12 @@ async function withClient<T>(
       if (signal.reason?.name === 'TimeoutError') throw sapAdtFailure({ code: 'ETIMEDOUT' })
       throw new DOMException('Acesso SAP cancelado.', 'AbortError')
     }
-    if (error instanceof SapAdtActionError || error instanceof z.ZodError) throw error
+    if (
+      error instanceof SapAdtActionError ||
+      error instanceof SapAdtSourceError ||
+      error instanceof z.ZodError
+    )
+      throw error
     throw sapAdtFailure(error)
   } finally {
     await session.close().catch(() => undefined)
@@ -437,7 +458,7 @@ export async function executeSapAdtTool(
     }
     const search = tool.name === 'search_objects' ? sapAdtSearchSchema.parse(input) : undefined
     const sourcePath =
-      tool.name === 'read_source'
+      tool.name === 'read_source' || tool.name === 'list_sources'
         ? sapAdtPath(sapAdtSourceSchema.parse(input).objectPath)
         : undefined
     if (sourcePath && !turn.objectPaths.has(`${connection.id}:${sourcePath}`))
@@ -465,8 +486,13 @@ export async function executeSapAdtTool(
               approve,
               known,
               atcRuns: turn.atcRuns,
-              hasSnapshot: (path, version, hash) =>
-                turn.sources.get(connection.id + ':' + path + ':' + version)?.hash === hash,
+              hasSnapshot: (path, version, hash, include) =>
+                [...turn.sources.entries()].some(
+                  ([key, snapshot]) =>
+                    key.startsWith(connection.id + ':' + path + ':' + version + ':') &&
+                    snapshot.hash === hash &&
+                    (!include || snapshot.includePath === include)
+                ),
               invalidate: (path) => {
                 for (const key of turn.sources.keys())
                   if (key.startsWith(connection.id + ':' + path + ':')) turn.sources.delete(key)
@@ -491,14 +517,23 @@ export async function executeSapAdtTool(
               limit: args.limit
             }
           }
+          if (tool.name === 'list_sources') {
+            const args = sapAdtSourceSchema.parse(input)
+            const structure = await client.objectStructure(sourcePath!, args.version)
+            return {
+              objectPath: sourcePath,
+              version: args.version,
+              sources: sapSourceCatalog(structure)
+            }
+          }
           if (tool.name === 'read_source') {
             const path = sourcePath!
             const sourceArgs = sapAdtSourceSchema.parse(input)
-            const cacheKey = `${connection.id}:${path}:${sourceArgs.version}`
+            const cacheKey = `${connection.id}:${path}:${sourceArgs.version}:${sourceArgs.sourcePath ?? 'main'}`
             let snapshot = turn.sources.get(cacheKey)
             if (!snapshot) {
               const structure = await client.objectStructure(path, sourceArgs.version)
-              const includePath = sapAdtPath(ADTClient.mainInclude(structure))
+              const includePath = selectSapSource(structure, sourceArgs.sourcePath)
               const source = await client.getObjectSource(includePath, {
                 version: sourceArgs.version
               })
@@ -507,7 +542,7 @@ export async function executeSapAdtTool(
                 includePath,
                 hash: createHash('sha256').update(source).digest('hex')
               }
-              if (turn.sources.size >= 4) turn.sources.delete(turn.sources.keys().next().value!)
+              if (turn.sources.size >= 32) turn.sources.delete(turn.sources.keys().next().value!)
               turn.sources.set(cacheKey, snapshot)
             }
             return {

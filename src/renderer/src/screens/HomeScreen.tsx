@@ -1,3 +1,6 @@
+import { ProviderRequestError, transientProviderError } from '@renderer/lib/providerRecovery'
+import { createFileWorkspace, type WorkspaceFile } from '@renderer/lib/fileWorkspace'
+import type { WorkProgress } from '@renderer/lib/workProgress'
 import { clipboardImages, isImageFile, readImageAttachment, MAX_IMAGE_ATTACHMENTS } from '@renderer/lib/imageAttachments'
 import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -90,6 +93,8 @@ import {
   type StreamFinishInfo
 } from '@renderer/lib/aiClient'
 import {
+  attachmentSources,
+  attachmentContext,
   buildMessageWithAttachments,
   extractTextFromFile,
   parseMessageAttachments,
@@ -348,7 +353,7 @@ export function HomeScreen(): JSX.Element {
   useEffect(() => {
     if (!user || !currentChatId || isStreaming) return
     let active = true
-    const turns = messages.filter((message) => !message.error && message.content.trim()).map(({ role, content, imageDataUrls }) => ({ role, content, imageDataUrls }))
+    const turns = messages.filter((message) => !message.error && message.content.trim()).map(({ role, content, imageDataUrls }, index) => ({ role, content: attachmentContext(content, String(index)), imageDataUrls }))
     void window.api.localFeatures.loadContext(user.id, currentChatId).then((saved) => validSnapshot(saved, turns)).then((snapshot) => {
       if (active) useContextStore.getState().update(contextKey, { snapshot: snapshot && snapshot.coveredCount <= compactionBoundary(turns, compactionSettings.recentTurns) ? snapshot : null })
     }).catch((error: Error) => { if (active) useContextStore.getState().update(contextKey, { error: error.message }) })
@@ -624,9 +629,7 @@ export function HomeScreen(): JSX.Element {
     if (selectedFolderId) {
       try {
         folderReference = await loadFolderReference(currentClientId, currentModuleId, selectedFolderId)
-        setFolderNotice(folderReference.limited
-          ? `Contexto do drive limitado: ${folderReference.names.length} arquivo(s) encontrado(s); parte do conteúdo foi omitida. Divida a análise em pastas menores para obter a documentação completa.`
-          : `${folderReference.names.length} arquivo(s) do drive incluído(s) nesta mensagem.`)
+        setFolderNotice(`${folderReference.names.length} arquivo(s) disponível(is) para busca e leitura completa pelo agente.`)
 
       } catch (cause) {
         pushLocalError(`Não foi possível carregar a pasta do drive: ${(cause as Error).message}`)
@@ -651,12 +654,28 @@ export function HomeScreen(): JSX.Element {
     const workbookContext = selectedClient?.workbookMd?.trim() || ''
     const routingContent = `${fullContent.slice(0, 4000)}${folderReference ? `\n\n${folderReference.content.slice(0, 4000)}` : ''}${workbookContext ? `\n\n${workbookContext}` : ''}`
 
-    let history: ChatTurn[] = messages
-      .filter((message) => !message.error && message.content.trim())
-      .map((message) => ({ role: message.role, content: message.content, imageDataUrls: message.imageDataUrls }))
+    const attachmentFiles: WorkspaceFile[] = []
+    const modelContent = (content: string, messageKey: string): string => {
+      const sources = attachmentSources(content)
+      if (!sources.length) return content
+      const references = sources.map((file, index) => {
+        const id = `attachment-${messageKey}-${index}`
+        attachmentFiles.push({ id, name: file.name, path: `Anexos / ${file.name}`, load: async signal => { signal.throwIfAborted(); return file.content } })
+        return { fileId: id, name: file.name }
+      })
+      return `${parseMessageAttachments(content).text}\n\nAnexos completos disponíveis pelas ferramentas workspace_read_file e workspace_list_files: ${JSON.stringify(references)}. Consulte os arquivos antes de responder.`
+    }
+    let history: ChatTurn[] = messages.filter(message => !message.error && message.content.trim())
+      .map((message, index) => ({ role: message.role, content: modelContent(message.content, String(index)), imageDataUrls: message.imageDataUrls }))
+    const currentContent = modelContent(fullContent, String(messages.filter(message => !message.error && message.content.trim()).length))
     history.push({ role: 'user', content: folderReference
-      ? `${fullContent}\n\n<contexto-drive>\n${folderReference.content}\n</contexto-drive>`
-      : fullContent, imageDataUrls: readyAttachments.flatMap((attachment) => attachment.imageDataUrl ? [attachment.imageDataUrl] : []) })
+      ? `${currentContent}\n\n<contexto-drive>\n${folderReference.content}\n</contexto-drive>`
+      : currentContent, imageDataUrls: readyAttachments.flatMap(attachment => attachment.imageDataUrl ? [attachment.imageDataUrl] : []) })
+    const workspaceFiles = [...(folderReference?.files ?? []), ...attachmentFiles]
+    const fileWorkspace = workspaceFiles.length || folderReference ? createFileWorkspace(workspaceFiles, 'Arquivos do cliente e anexos', async () => {
+      if (useAuthStore.getState().user?.id !== user.id) throw new Error('A conta mudou durante a consulta dos arquivos.')
+      await folderReference?.authorize()
+    }) : undefined
     const sourceHistory = [...history]
 
     const userMessage: UiMessage = { id: createId(), role: 'user', content: fullContent, imageDataUrls: readyAttachments.flatMap((attachment) => attachment.imageDataUrl ? [attachment.imageDataUrl] : []) }
@@ -884,6 +903,8 @@ export function HomeScreen(): JSX.Element {
     let iterationHistory = history
     let finished = false
     let streamFailed = false
+    const sessionActivity: ToolActivityItem = {id:'agent-session',label:'Sessão · executando a tarefa',kind:'document',status:'running'}
+    toolActivity.push(sessionActivity); pushToolActivity()
     let iteration = 0
     const startTime = performance.now()
     const specializedAgent = agent?.source === 'default' && ['ef_consultant', 'dtec_consultant', 'effort_estimator', 'code_review', 'performance_analyzer', 'enhancement_finder', 'customizing_consultant'].includes(agent.id)
@@ -991,37 +1012,63 @@ export function HomeScreen(): JSX.Element {
         if (preparedEfTemplate.snapshot) runtimePrompt = `${runtimePrompt ?? ''}\n\n${efTemplatePrompt(preparedEfTemplate.snapshot, preparedEfTemplate.label)}`
         runtimePrompt = `${runtimePrompt ?? ''}\n\n${efEstimatePrompt(efEstimateParameters, selectedClient?.name ?? '')}\n\n## Identificação atual da EF\nCliente: ${JSON.stringify(selectedClient?.name ?? 'A CONFIRMAR')}; módulo selecionado: ${JSON.stringify(modules.find((module) => module.id === currentModuleId)?.name ?? 'A CONFIRMAR')}; consultor autenticado: ${JSON.stringify(profile?.nome ?? 'A CONFIRMAR')}; data de emissão: ${new Date().toLocaleDateString('pt-BR')}. Use esses dados nos campos correspondentes. Não confunda data de emissão com data de solicitação ou aprovação.`
       }
-      if (agent) {
-        const mcpServers = configsForAgent(agent.source, agent.id)
-        if (mcpServers.length > 0 || (sapRequested && user?.id)) {
+      if (agent || fileWorkspace) {
+        const mcpServers = agent ? configsForAgent(agent.source, agent.id) : []
+        if (mcpServers.length > 0 || fileWorkspace || (sapRequested && user?.id)) {
           await prepareTurnContext()
           try {
+            const progressScope = JSON.stringify([user.id, chatId, currentClientId, currentModuleId, selectedFolderId, sapConnectionId, agent?.source, agent?.id])
+            const previousProgress = messages.flatMap(message => message.toolActivity ?? []).map(item => item.workProgress).filter((progress): progress is WorkProgress => progress?.scope === progressScope).at(-1)
+            const progressItem: ToolActivityItem = { id: 'workspace-progress', label: 'Progresso da tarefa', kind: 'document', status: 'running' }
+            toolActivity.push(progressItem)
             const mcpEvidence = await runMcpToolLoop({
+              workspace: fileWorkspace,
+              claudeEffort: defaultProvider === 'claude' ? claudeEffort : undefined,
+              claudeShowThinking: aiPreferences.showThinking,
+              claudeWebSearch: aiPreferences.webSearch,
+              claudeWebFetch: aiPreferences.webFetch,
+              onServerTool: event => {
+                const id = `agent-web-${'id' in event ? event.id : event.url}`
+                const old=toolActivity.find(item=>item.id===id)
+                if(old && event.type==='result') old.status=event.ok?'done':'error'
+                else if(!old) toolActivity.push({id,label:event.type==='call'?`Web · ${event.name}`:event.type==='citation'?event.title:'Web · resultado recebido',kind:event.type==='citation'?'source':'web',status:event.type==='call'?'running':'done',url:'url' in event?event.url:undefined})
+                pushToolActivity()
+              },
+              onAnswer: text => { accumulated = text; finished = true; flushContent() },
+              onUsage: (input, output) => { totalInputTokens += input; totalOutputTokens += output },
+              onThinking: event => {
+                if (event.type === 'delta') { thinkingText += event.text; scheduleRender(); return }
+                if (event.type === 'start') { sawThinking = true; thinkingSince = Date.now() } else closeThinking()
+                rt.updateMessage(chatId!, assistantId, {thinkingSince:thinkingSince ?? undefined,thinkingMs,thinkingText})
+              },
+              inputBudget: turnInputBudget,
+              progress: previousProgress ?? { scope: progressScope, notes: '', steps: [] },
+              onProgress: progress => { progressItem.workProgress = progress; progressItem.status = progress.state === 'completed' ? 'done' : ['interrupted','pending'].includes(progress.state ?? '') ? 'error' : 'running'; pushToolActivity() },
               provider: defaultProvider,
               model: defaultModel,
               apiKey,
               messages: history,
               systemPrompt: runtimePrompt ?? undefined,
               servers: mcpServers,
-              sapAdt: sapConnectionId && user?.id ? { connectionId: sapConnectionId, userId: user.id, token: (await supabase.auth.getSession()).data.session?.access_token ?? '', agent: { source: agent.source, id: agent.id } } : undefined,
+              sapAdt: sapConnectionId && user?.id && agent ? { connectionId: sapConnectionId, userId: user.id, token: (await supabase.auth.getSession()).data.session?.access_token ?? '', agent: { source: agent.source, id: agent.id } } : undefined,
               signal: controller.signal,
               onToolEvent: (event) => {
-                const label = `${event.serverName} · ${event.toolName}`
+                const label = `${event.serverName} · ${event.toolName}${event.detail ? ` · ${event.detail}` : ''}`
                 const existing = toolActivity.find((item) => item.id === event.id)
-                if (existing) existing.status = event.status
+                if (existing) { existing.status = event.status; existing.label = label }
                 else toolActivity.push({ id: event.id, label, kind: (event.serverName === 'SAP ADT' || event.serverName.includes('mandante')) ? 'sap' : 'mcp', status: event.status })
                 pushToolActivity()
               }
             })
             if (mcpEvidence) runtimePrompt = `${runtimePrompt ?? ''}\n\n---\n\n${mcpEvidence}`
           } catch (mcpError) {
-            if ((mcpError as Error).name === 'AbortError') throw mcpError
+            if ((mcpError as Error).name === 'AbortError' || mcpError instanceof ProviderRequestError || transientProviderError(mcpError)) throw mcpError
             runtimePrompt = `${runtimePrompt ?? ''}\n\n---\n\n## Falha nas integrações nesta interação\nNão foi possível consultar as ferramentas configuradas: ${(mcpError as Error).message}. Informe essa limitação ao usuário e não apresente dados das integrações como verificados.`
           }
         }
       }
 
-      await prepareTurnContext()
+      if (!finished) await prepareTurnContext()
       while (!finished && iteration < MAX_CONTINUATIONS) {
         if (iteration > 0) {
           const estimated = contextTokens(iterationHistory, runtimePrompt ?? '')
@@ -1045,6 +1092,11 @@ export function HomeScreen(): JSX.Element {
           signal: controller.signal,
           claudeEffort: defaultProvider === 'claude' ? claudeEffort : undefined,
           claudeShowThinking: aiPreferences.showThinking,
+          onRetry: event => {
+            closeThinking()
+            sessionActivity.status='running'; sessionActivity.label=event.recovered ? 'Sessão · conexão recuperada, continuando' : `Sessão · provedor temporariamente indisponível, tentativa ${event.attempt}/${event.maxRetries} em ${Math.ceil(event.delayMs/1000)}s`
+            pushToolActivity()
+          },
           claudeWebSearch: aiPreferences.webSearch,
           claudeWebFetch: aiPreferences.webFetch,
           onServerTool: (event) => {
@@ -1100,7 +1152,8 @@ export function HomeScreen(): JSX.Element {
         totalInputTokens += finishInfo.inputTokens ?? 0
         totalOutputTokens += finishInfo.outputTokens ?? 0
 
-        if (finishInfo.reason === 'length' && iteration < MAX_CONTINUATIONS) {
+        if (finishInfo.reason === 'length') {
+          if (iteration >= MAX_CONTINUATIONS) throw new Error('O limite de continuação da resposta foi atingido. O texto e o progresso foram preservados; a tarefa permanece pendente.')
           iterationHistory = [
             ...iterationHistory,
             { role: 'assistant', content: accumulated },
@@ -1171,10 +1224,18 @@ export function HomeScreen(): JSX.Element {
       const elapsedMs = performance.now() - startTime
       // Stream cancelado ou com erro no meio do thinking não recebe content_block_stop.
       closeThinking()
+      const hasSavedProgress = toolActivity.some(item => item.workProgress && (item.workProgress.steps.length || item.workProgress.notes))
+      const finalContent = accumulated || (hasSavedProgress ? (controller.signal.aborted ? 'Execução interrompida. O progresso foi preservado; confira os resultados antes de continuar.' : 'O progresso foi preservado, mas o provedor não concluiu a resposta. Continue a tarefa para retomar as pendências.') : '')
+      const sessionIncomplete = streamFailed || controller.signal.aborted || !finished || toolActivity.some(item => item.workProgress?.state === 'pending' || item.workProgress?.state === 'interrupted')
+      sessionActivity.status = sessionIncomplete ? 'error' : 'done'
+      sessionActivity.label = sessionIncomplete ? 'Sessão interrompida · progresso preservado' : 'Sessão concluída'
+      for (const item of toolActivity) if (item.id === 'workspace-progress' && sessionIncomplete) { item.status='error'; if(item.workProgress) item.workProgress = {...item.workProgress,state:'interrupted',stateDetail:sessionActivity.label} }
+      for (const item of toolActivity) if (item.status === 'running') { item.status='error'; item.label += ' · resultado não confirmado' }
+      pushToolActivity()
       const emptyResponse = !accumulated.trim() && !controller.signal.aborted && !streamFailed
       rt.updateMessage(chatId, assistantId, {
-        content: accumulated,
-        ...(emptyResponse ? { error: 'O provedor encerrou a solicitação sem retornar conteúdo. Tente novamente com uma pasta menor ou verifique os limites do modelo.' } : {}),
+        content: finalContent,
+        ...(emptyResponse ? { error: 'O provedor encerrou a solicitação sem retornar conteúdo. O progresso disponível foi preservado; continue a tarefa ou verifique os limites do modelo.' } : {}),
         streaming: false,
         continuing: undefined,
         ...(sawThinking ? { thinkingSince: undefined, thinkingMs, thinkingText } : {}),
@@ -1184,12 +1245,12 @@ export function HomeScreen(): JSX.Element {
       })
       rt.setStreaming(chatId, false)
       rt.setController(chatId, null)
-      rt.setStatus(chatId, parseClarify(accumulated) ? 'needs_input' : 'done')
+      rt.setStatus(chatId, sessionIncomplete || parseClarify(accumulated) ? 'needs_input' : 'done')
 
-      if (chatId && accumulated) {
+      if (chatId && finalContent && useAuthStore.getState().user?.id === user.id) {
         await persistMessage(chatId, {
           role: 'assistant',
-          content: accumulated,
+          content: finalContent,
           tokensInput: totalInputTokens || null,
           tokensOutput: totalOutputTokens || null,
           responseMs: Math.round(elapsedMs),

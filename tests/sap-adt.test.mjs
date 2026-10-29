@@ -269,7 +269,7 @@ test('agent permissions and enabled state determine the actual main-process tool
   const turn = await f.begin()
   assert.deepEqual(
     [...turn.tools.map((tool) => tool.name)],
-    ['search_objects', 'read_source', 'read_table']
+    ['search_objects', 'read_source', 'list_sources', 'read_table']
   )
   assert.equal(
     turn.tools.some((tool) => /write|activate|delete|execute|sql/.test(tool.name)),
@@ -573,4 +573,23 @@ test('each message grants exactly its selected connection, rejecting absent, for
   await f.save({ ...connection, enabled: false })
   assert.equal((await f.begin()).tools.length, 0)
   assert.equal(f.calls.length, 0)
+})
+
+test('source discovery is scoped to a searched object and only its returned paths can be read', async (t) => {
+  const f = fixture(t)
+  await f.save()
+  const turn = await f.begin()
+  await assert.rejects(f.execute(turn, 'list_sources', { objectPath }), /Pesquise/)
+  await f.execute(turn, 'search_objects', { pattern: 'ZCL_EXAMPLE' })
+  const catalog = await f.execute(turn, 'list_sources', { objectPath })
+  assert.equal(catalog.result.sources[0].sourcePath, sourcePath)
+  const read = await f.execute(turn, 'read_source', { objectPath, sourcePath })
+  assert.ok(read.result.source)
+  await assert.rejects(
+    f.execute(turn, 'read_source', {
+      objectPath,
+      sourcePath: '/sap/bc/adt/oo/classes/foreign/source/main'
+    }),
+    /não pertence/
+  )
 })

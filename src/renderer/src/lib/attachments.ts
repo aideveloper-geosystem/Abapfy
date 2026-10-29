@@ -4,8 +4,6 @@ import mammoth from 'mammoth'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 
-const MAX_CHARS_PER_FILE = 60000
-
 export interface AttachmentFile {
   id: string
   name: string
@@ -14,11 +12,6 @@ export interface AttachmentFile {
   content?: string
   imageDataUrl?: string
   error?: string
-}
-
-function truncate(text: string): string {
-  if (text.length <= MAX_CHARS_PER_FILE) return text
-  return `${text.slice(0, MAX_CHARS_PER_FILE)}\n\n[...conteúdo truncado — arquivo maior que ${MAX_CHARS_PER_FILE} caracteres...]`
 }
 
 async function extractPdfText(file: File): Promise<string> {
@@ -89,14 +82,24 @@ export async function extractTextFromFile(file: File): Promise<string> {
   const extension = extensionOf(file.name)
 
   if (extension === 'pdf' || file.type === 'application/pdf') {
-    return truncate(await extractPdfText(file))
+    const text = await extractPdfText(file)
+    if (!text.trim())
+      throw new Error(
+        'O PDF não possui texto extraível. Envie uma versão com texto ou aplique OCR ao original.'
+      )
+    return text
   }
 
   if (
     extension === 'docx' ||
     file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
   ) {
-    return truncate(await extractDocxText(file))
+    const text = await extractDocxText(file)
+    if (!text.trim())
+      throw new Error(
+        'O DOCX não possui texto extraível. Confira o original ou envie uma versão com texto.'
+      )
+    return text
   }
 
   if (extension === 'doc') {
@@ -104,7 +107,7 @@ export async function extractTextFromFile(file: File): Promise<string> {
   }
 
   if (TEXT_EXTENSIONS.has(extension) || file.type.startsWith('text/') || !file.type) {
-    return truncate(await file.text())
+    return await file.text()
   }
 
   throw new Error(`Tipo de arquivo não suportado: .${extension || '?'}`)
@@ -118,13 +121,7 @@ export function buildMessageWithAttachments(
 ): string {
   if (attachments.length === 0) return text
 
-  const block = attachments
-    .map(
-      (attachment) =>
-        `<file name="${attachment.name.replace(/"/g, "'")}">\n${attachment.content}\n</file>`
-    )
-    .join('\n')
-
+  const block = JSON.stringify({ files: attachments }).replace(/</g, '\\u003c')
   return `${text}\n\n<attached-files>\n${block}\n</attached-files>`
 }
 
@@ -133,12 +130,36 @@ export interface ParsedAttachedMessage {
   attachments: { name: string }[]
 }
 
+export function attachmentSources(content: string): { name: string; content: string }[] {
+  const match = content.match(/<attached-files>([\s\S]*)<\/attached-files>\s*$/)
+  if (!match) return []
+  try {
+    const value = JSON.parse(match[1])
+    if (Array.isArray(value.files))
+      return value.files.filter(
+        (file: { name?: unknown; content?: unknown }) =>
+          typeof file.name === 'string' && typeof file.content === 'string'
+      )
+  } catch {
+    /* Legacy messages contain XML wrappers. */
+  }
+  return Array.from(match[1].matchAll(/<file name="([^"]*)">\n?([\s\S]*?)<\/file>/g), (m) => ({
+    name: m[1],
+    content: m[2].replace(/\n$/, '')
+  }))
+}
 export function parseMessageAttachments(content: string): ParsedAttachedMessage {
-  const match = content.match(/<attached-files>([\s\S]*?)<\/attached-files>/)
-  if (!match) return { text: content, attachments: [] }
+  const attachments = attachmentSources(content)
+  if (!attachments.length) return { text: content, attachments: [] }
+  return {
+    text: content.replace(ATTACHED_FILES_BLOCK, '').trim(),
+    attachments: attachments.map(({ name }) => ({ name }))
+  }
+}
 
-  const text = content.replace(ATTACHED_FILES_BLOCK, '').trim()
-  const names = Array.from(match[1].matchAll(/<file name="([^"]*)">/g)).map((m) => m[1])
-
-  return { text, attachments: names.map((name) => ({ name })) }
+/** The originals remain in persisted messages; model requests receive stable references. */
+export function attachmentContext(content: string, messageKey: string): string {
+  const files = attachmentSources(content)
+  if (!files.length) return content
+  return `${parseMessageAttachments(content).text}\n\nAnexos completos disponíveis pelas ferramentas workspace_read_file e workspace_list_files: ${JSON.stringify(files.map((file, index) => ({ fileId: `attachment-${messageKey}-${index}`, name: file.name })))}. Consulte os arquivos antes de responder.`
 }

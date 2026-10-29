@@ -80,6 +80,14 @@ export function sapAdtFailure(error: unknown): Error {
     return new Error(
       'SAP recusou a operação por falta de autorização ou configuração de acesso ADT.'
     )
+  if (status === 409 || status === 423)
+    return new Error(
+      'O SAP informou conflito ou bloqueio do objeto. Consulte o lock e a request/tarefa; releia a fonte antes de tentar novamente.'
+    )
+  if (status === 412)
+    return new Error(
+      'A versão do objeto SAP mudou. Releia as fontes e prepare novamente a alteração; nenhuma repetição automática será feita.'
+    )
   if (status === 404)
     return new Error(
       'Serviço ADT não disponível nesta URL. Solicite ao BASIS a verificação de /sap/bc/adt na SICF e da versão do sistema.'

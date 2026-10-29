@@ -42,6 +42,22 @@ const def = (
   fields: z.ZodRawShape,
   confirm = true
 ): Definition => ({ name, permission, description, schema: z.object(fields).strict(), confirm })
+const editFields = {
+  ...object,
+  sourcePath: path.optional(),
+  expectedHash: hash,
+  version: z.enum(['active', 'inactive']).default('active'),
+  oldText: z.string().min(1).max(60000).optional(),
+  newText: z.string().max(60000).optional(),
+  edits: z
+    .array(
+      z.object({ oldText: z.string().min(1).max(60000), newText: z.string().max(60000) }).strict()
+    )
+    .min(1)
+    .max(30)
+    .optional(),
+  transport: z.union([request, z.literal('$TMP')])
+}
 export const SAP_ADT_ADVANCED: Definition[] = [
   def(
     'object_details',
@@ -61,7 +77,11 @@ export const SAP_ADT_ADVANCED: Definition[] = [
     'syntax_check',
     'allowQuality',
     'Valida a sintaxe da fonte ativa ou inativa, sem gravar.',
-    { ...object, version: z.enum(['active', 'inactive']).default('inactive') },
+    {
+      ...object,
+      sourcePath: path.optional(),
+      version: z.enum(['active', 'inactive']).default('inactive')
+    },
     false
   ),
   def(
@@ -127,21 +147,21 @@ export const SAP_ADT_ADVANCED: Definition[] = [
   def(
     'edit_source',
     'allowWrite',
-    'Edita uma ocorrência exata em fonte ativa/inativa previamente lida nesta mensagem. Informe sourceHash, oldText, newText e request existente ou $TMP. Mostra diff, salva sob lock e verifica a fonte inativa. Não ativa. Nunca repetir automaticamente uma gravação incerta.',
-    {
-      ...object,
-      expectedHash: hash,
-      version: z.enum(['active', 'inactive']).default('active'),
-      oldText: z.string().min(1).max(60000),
-      newText: z.string().max(60000),
-      transport: z.union([request, z.literal('$TMP')])
-    }
+    'Edita uma ou várias ocorrências exatas na mesma fonte ativa/inativa previamente lida nesta mensagem. Use edits: [{oldText,newText}] para várias mudanças independentes ou oldText/newText para uma mudança; sourcePath opcional deve vir de list_sources. Informe sourceHash, oldText, newText e request existente ou $TMP. Mostra diff, salva sob lock e verifica a fonte inativa. Não ativa. Nunca repetir automaticamente uma gravação incerta.',
+    editFields
+  ),
+  def(
+    'preview_edits',
+    'allowWrite',
+    'Prepara várias substituições exatas na mesma fonte previamente lida, sem gravar. Use edits para mudanças independentes ou oldText/newText para uma mudança. Confira a proposta antes de edit_source.',
+    editFields,
+    false
   ),
   def(
     'activate_object',
     'allowActivate',
     'Ativa a fonte INATIVA previamente lida, validando seu sourceHash sob lock. A ativação afeta a versão executável.',
-    { ...object, expectedHash: hash }
+    { ...object, sourcePath: path.optional(), expectedHash: hash }
   ),
   def(
     'create_object',

@@ -2,6 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { loadTs } from './load-typescript.mjs'
 const clientClass = class {
+  static classIncludes(structure) {
+    return new Map(structure.includes.map((include) => [include.name, include.path]))
+  }
   static mainInclude() {
     return '/sap/bc/adt/oo/classes/zcl_test/source/main'
   }
@@ -54,6 +57,7 @@ function fixture() {
       inactive = source
       if (failSave) throw Error('network failure after save')
     },
+    syntaxCheck: async () => [],
     transportInfo: async () => ({ DEVCLASS: '$TMP' }),
     transportDetails: async () => ({ 'tm:status': 'D', tasks: [] }),
     activate: async () => {
@@ -270,4 +274,123 @@ test('debug sessions preserve the client between calls and clean up only their o
   assert.ok(calls.includes('detachDebugger'))
   assert.ok(calls.some((call) => call[0] === 'deleteBreakpoint' && call[1] === 'own-breakpoint'))
   assert.ok(calls.includes('close'))
+})
+
+test('multi-edit proposals do not write; independent replacements save once, overlapping or ambiguous changes never lock', async () => {
+  const f = fixture()
+  const { oldText, newText, ...base } = f.args
+  const args = {
+    ...base,
+    edits: [
+      { oldText: 'old', newText: 'new' },
+      { oldText: 'ENDCLASS.', newText: 'ENDCLASS. " revised' }
+    ]
+  }
+  const preview = await advanced.runSapAdtAdvanced('preview_edits', args, f.ctx)
+  assert.equal(preview.status, 'proposed')
+  assert.equal(preview.changes.length, 2)
+  assert.equal(f.calls.length, 0)
+  const saved = await advanced.runSapAdtAdvanced('edit_source', args, f.ctx)
+  assert.equal(saved.status, 'saved_inactive')
+  assert.equal(saved.changes, 2)
+  assert.equal(saved.validation.status, 'syntax_valid')
+  assert.equal(f.calls.filter((call) => call === 'save').length, 1)
+  assert.match(f.calls[0][1], /@@ linha 1 @@/)
+  const overlap = fixture()
+  await assert.rejects(
+    advanced.runSapAdtAdvanced(
+      'edit_source',
+      {
+        ...base,
+        edits: [
+          { oldText: 'CLASS old.', newText: 'A' },
+          { oldText: 'old', newText: 'B' }
+        ]
+      },
+      overlap.ctx
+    ),
+    /sobrepõem/
+  )
+  assert.equal(overlap.calls.includes('lock'), false)
+  await assert.rejects(
+    advanced.runSapAdtAdvanced('edit_source', { ...f.args, edits: args.edits }, fixture().ctx),
+    /sem combinar/
+  )
+})
+
+test('selected class includes have their own source, hash and validation; arbitrary paths cannot be read or saved', async () => {
+  const f = fixture(),
+    definitions = path + '/includes/definitions',
+    main = path + '/source/main'
+  let active = 'TYPES old TYPE string.',
+    inactive = active
+  f.ctx.client.objectStructure = async () => ({
+    metaData: { 'adtcore:name': 'ZCL_TEST' },
+    includes: [
+      { name: 'main', path: main },
+      { name: 'definitions', path: definitions }
+    ]
+  })
+  f.ctx.client.getObjectSource = async (source, options) => {
+    assert.equal(source, definitions)
+    return options.version === 'inactive' ? inactive : active
+  }
+  f.ctx.client.setObjectSource = async (source, text) => {
+    assert.equal(source, definitions)
+    inactive = text
+    f.calls.push('save')
+  }
+  f.ctx.client.syntaxCheck = async (source, _object, text) => {
+    assert.equal(source, definitions)
+    assert.equal(text, inactive)
+    return []
+  }
+  f.ctx.hasSnapshot = (_path, _version, hash, source) =>
+    hash === advanced.sourceHash(active) && source === definitions
+  const args = { ...f.args, expectedHash: advanced.sourceHash(active), sourcePath: definitions }
+  const result = await advanced.runSapAdtAdvanced('edit_source', args, f.ctx)
+  assert.equal(result.sourcePath, definitions)
+  assert.equal(inactive, 'TYPES new TYPE string.')
+  await assert.rejects(
+    advanced.runSapAdtAdvanced(
+      'edit_source',
+      { ...args, sourcePath: '/sap/bc/adt/oo/classes/foreign/source/main' },
+      f.ctx
+    ),
+    /não pertence/
+  )
+})
+
+test('syntax errors remain a verified inactive save, while activation rejects unreviewed inactive includes', async () => {
+  const f = fixture()
+  f.ctx.client.syntaxCheck = async () => [{ severity: 'E', line: 1, text: 'Syntax error' }]
+  const result = await advanced.runSapAdtAdvanced('edit_source', f.args, f.ctx)
+  assert.equal(result.status, 'saved_inactive')
+  assert.equal(result.validation.status, 'syntax_errors')
+  assert.equal(result.activated, false)
+  const a = fixture(),
+    extra = path + '/includes/definitions'
+  a.ctx.client.objectStructure = async () => ({
+    metaData: { 'adtcore:name': 'ZCL_TEST' },
+    includes: [
+      { name: 'main', path: path + '/source/main' },
+      { name: 'definitions', path: extra }
+    ]
+  })
+  const originalRead = a.ctx.client.getObjectSource
+  a.ctx.client.getObjectSource = async (source, options) =>
+    source === extra
+      ? options.version === 'inactive'
+        ? 'new pending definition'
+        : 'active definition'
+      : originalRead(source, options)
+  await assert.rejects(
+    advanced.runSapAdtAdvanced(
+      'activate_object',
+      { objectPath: path, expectedHash: a.args.expectedHash },
+      a.ctx
+    ),
+    /ainda não revisadas/
+  )
+  assert.equal(a.calls.includes('activate'), false)
 })

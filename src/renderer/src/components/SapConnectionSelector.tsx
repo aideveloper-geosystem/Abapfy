@@ -81,8 +81,11 @@ export function SapConnectionSelector({
   }, [userId, refreshKey])
   const selected = value && value.userId === userId ? value.connectionId : ''
   useEffect(() => {
-    onConnectionChange?.(rows.find((row) => row.id === selected && row.enabled && row.hasPassword) ?? null)
+    onConnectionChange?.(
+      rows.find((row) => row.id === selected && row.enabled && row.hasPassword) ?? null
+    )
   }, [rows, selected, onConnectionChange])
+  const selectedConnection = rows.find((row) => row.id === selected)
   return (
     <div className="sap-connection-picker">
       <select
@@ -117,6 +120,37 @@ export function SapConnectionSelector({
       >
         <Settings2 size={15} />
       </button>
+      {selectedConnection && (
+        <details className="sap-capabilities">
+          <summary title="Ver permissões da conexão selecionada">Permissões SAP</summary>
+          <div>
+            <strong>
+              {selectedConnection.name} · {environments[selectedConnection.environment]} ·{' '}
+              {selectedConnection.client}
+            </strong>
+            {(
+              [
+                ['allowSource', 'Ler fontes'],
+                ['allowWrite', 'Editar e salvar inativo'],
+                ['allowQuality', 'Validar sintaxe e qualidade'],
+                ['allowTransports', 'Gerenciar requests'],
+                ['allowActivate', 'Ativar objetos']
+              ] as const
+            ).map(([key, label]) => (
+              <p key={key}>
+                {label}: {selectedConnection[key] ? 'habilitado' : 'desativado'}
+              </p>
+            ))}
+            <p>
+              O agente também precisa estar autorizado em Integrações. Cada gravação passa por
+              revisão.
+            </p>
+            <button type="button" onClick={onManage} disabled={disabled}>
+              Configurar permissões
+            </button>
+          </div>
+        </details>
+      )}
       {error && (
         <span className="sap-connection-error" role="alert" title={error}>
           Conexões indisponíveis

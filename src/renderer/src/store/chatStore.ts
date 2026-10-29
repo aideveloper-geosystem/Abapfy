@@ -1,3 +1,4 @@
+import type { WorkProgress } from '@renderer/lib/workProgress'
 import { create } from 'zustand'
 import { supabase } from '@renderer/lib/supabaseClient'
 import { useAuthStore } from '@renderer/store/authStore'
@@ -53,6 +54,7 @@ export interface PersistedToolActivity {
   label: string
   kind: 'skill' | 'mcp' | 'sap' | 'web' | 'source' | 'document' | 'local' | 'compact'
   status: 'running' | 'confirm' | 'done' | 'error'
+  workProgress?: WorkProgress
   url?: string
   efDocument?: EfDocumentJob
   localSearch?: LocalSearchActivity

@@ -144,6 +144,7 @@ export const sapAdtSearchSchema = z
 export const sapAdtSourceSchema = z
   .object({
     objectPath: z.string().min(1).max(2048),
+    sourcePath: z.string().max(2048).transform(sapAdtPath).optional(),
     version: z.enum(['active', 'inactive']).default('active'),
     offset: z.number().int().min(0).max(5_000_000).default(0),
     length: z.number().int().min(1).max(12000).default(12000),
@@ -272,6 +273,6 @@ export function sapAdtAccessDiagnostics(
       )
     )
       return `${connection.name}: conexão habilitada, mas este agente não está autorizado. Selecione o agente em Configurações > Integrações > SAP · ADT e salve.`
-    return `${connection.name}: pesquisa de objetos disponível; leitura de fonte ${connection.allowSource ? 'habilitada' : 'desativada'}; consulta de tabelas ${connection.allowTables ? 'habilitada, com aprovação' : 'desativada. Ative Permitir consulta de tabelas nas permissões da conexão e salve'}.`
+    return `${connection.name}: pesquisa de objetos disponível; leitura de fonte ${connection.allowSource ? 'habilitada' : 'desativada'}; consulta de tabelas ${connection.allowTables ? 'habilitada, com aprovação' : 'desativada. Ative Permitir consulta de tabelas nas permissões da conexão e salve'}; edição ${connection.allowWrite ? 'habilitada, com revisão' : 'desativada (habilite Editar fonte ABAP em Configurações > Integrações > SAP · ADT)'}; validação de sintaxe/qualidade ${connection.allowQuality ? 'habilitada' : 'desativada'}; transportes ${connection.allowTransports ? 'habilitados' : 'desativados (informe request existente ou habilite o gerenciamento)'}; ativação ${connection.allowActivate ? 'habilitada, com aprovação específica' : 'desativada'}.`
   })
 }

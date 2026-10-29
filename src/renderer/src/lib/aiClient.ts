@@ -1,3 +1,9 @@
+import {
+  recoverProvider,
+  providerHttpError,
+  ProviderRequestError,
+  type RecoveryEvent
+} from './providerRecovery'
 import { claudeTurn, openAiTurn, geminiTurn } from './imagePayload'
 import { supabase } from '@renderer/lib/supabaseClient'
 import type { AiProviderId } from '@renderer/lib/aiProviders'
@@ -35,27 +41,80 @@ export const ROUTER_MODEL = 'claude-haiku-5-5'
 // Classificação curta: esforço baixo reduz latência; o orçamento inclui thinking.
 const ROUTER_MAX_TOKENS = 2048
 
-export async function countClaudeContext(args: { apiKey: string; model: string; messages: ChatTurn[]; prompt: string; signal: AbortSignal }): Promise<number | null> {
+export async function countClaudeContext(args: {
+  apiKey: string
+  model: string
+  messages: ChatTurn[]
+  prompt: string
+  signal: AbortSignal
+}): Promise<number | null> {
   try {
-    const response = await fetch(`${ANTHROPIC_API_URL}/count_tokens`, { method: 'POST', signal: AbortSignal.any([args.signal, AbortSignal.timeout(10000)]), headers: claudeHeaders(args.apiKey, args.model), body: JSON.stringify({ model: args.model, ...(args.prompt ? { system: args.prompt } : {}), messages: args.messages.map(claudeTurn) }) })
+    const response = await fetch(`${ANTHROPIC_API_URL}/count_tokens`, {
+      method: 'POST',
+      signal: AbortSignal.any([args.signal, AbortSignal.timeout(10000)]),
+      headers: claudeHeaders(args.apiKey, args.model),
+      body: JSON.stringify({
+        model: args.model,
+        ...(args.prompt ? { system: args.prompt } : {}),
+        messages: args.messages.map(claudeTurn)
+      })
+    })
     if (!response.ok) return null
     const data = await response.json()
-    return Number.isSafeInteger(data.input_tokens) && data.input_tokens > 0 ? data.input_tokens : null
-  } catch { args.signal.throwIfAborted(); return null }
+    return Number.isSafeInteger(data.input_tokens) && data.input_tokens > 0
+      ? data.input_tokens
+      : null
+  } catch {
+    args.signal.throwIfAborted()
+    return null
+  }
 }
 
-export async function summarizeWithRouter(args: { apiKey: string; system: string; content: string; maxTokens: number; signal: AbortSignal }): Promise<{ summary: ContextSummary; inputTokens: number; outputTokens: number }> {
+export async function summarizeWithRouter(args: {
+  apiKey: string
+  system: string
+  content: string
+  maxTokens: number
+  signal: AbortSignal
+}): Promise<{ summary: ContextSummary; inputTokens: number; outputTokens: number }> {
   const response = await fetch(ANTHROPIC_API_URL, {
-    method: 'POST', signal: AbortSignal.any([args.signal, AbortSignal.timeout(90000)]),
+    method: 'POST',
+    signal: AbortSignal.any([args.signal, AbortSignal.timeout(90000)]),
     headers: claudeHeaders(args.apiKey, ROUTER_MODEL),
-    body: JSON.stringify({ ...claudeModelParams(ROUTER_MODEL, { effort: 'low', maxTokens: args.maxTokens, thinkingMaxTokens: args.maxTokens * 2 }), system: args.system, messages: [{ role: 'user', content: args.content }] })
+    body: JSON.stringify({
+      ...claudeModelParams(ROUTER_MODEL, {
+        effort: 'low',
+        maxTokens: args.maxTokens,
+        thinkingMaxTokens: args.maxTokens * 2
+      }),
+      system: args.system,
+      messages: [{ role: 'user', content: args.content }]
+    })
   })
-  if (!response.ok) throw new Error(`Router indisponível para compactação (HTTP ${response.status}).`)
+  if (!response.ok)
+    throw new Error(`Router indisponível para compactação (HTTP ${response.status}).`)
   const data = await response.json()
-  if (data.stop_reason !== 'end_turn' || !Array.isArray(data.content)) throw new Error('O router não concluiu o resumo. O contexto original foi preservado.')
-  const raw = data.content.filter((block: { type: string; text?: string }) => block.type === 'text' && typeof block.text === 'string').map((block: { text: string }) => block.text).join('').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+  if (data.stop_reason !== 'end_turn' || !Array.isArray(data.content))
+    throw new Error('O router não concluiu o resumo. O contexto original foi preservado.')
+  const raw = data.content
+    .filter(
+      (block: { type: string; text?: string }) =>
+        block.type === 'text' && typeof block.text === 'string'
+    )
+    .map((block: { text: string }) => block.text)
+    .join('')
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
   const summary = contextSummarySchema.parse(JSON.parse(raw))
-  return { summary, inputTokens: (data.usage?.input_tokens ?? 0) + (data.usage?.cache_read_input_tokens ?? 0) + (data.usage?.cache_creation_input_tokens ?? 0), outputTokens: data.usage?.output_tokens ?? 0 }
+  return {
+    summary,
+    inputTokens:
+      (data.usage?.input_tokens ?? 0) +
+      (data.usage?.cache_read_input_tokens ?? 0) +
+      (data.usage?.cache_creation_input_tokens ?? 0),
+    outputTokens: data.usage?.output_tokens ?? 0
+  }
 }
 
 async function requestRouter(
@@ -128,6 +187,7 @@ interface StreamChatArgs {
   systemPrompt?: string
   onDelta: (text: string) => void
   onFinish?: (info: StreamFinishInfo) => void
+  onRetry?: (event: RecoveryEvent) => void
   signal: AbortSignal
   /** Só se aplica ao provedor Claude — controla o output_config.effort (adaptive thinking). */
   claudeEffort?: ClaudeEffort
@@ -148,13 +208,25 @@ interface StreamChatArgs {
 export type ThinkingEvent = { type: 'start' } | { type: 'delta'; text: string } | { type: 'stop' }
 
 export type ServerToolEvent =
-  | { type: 'call'; id: string; name: 'web_search' | 'web_fetch' | string; query?: string; url?: string }
+  | {
+      type: 'call'
+      id: string
+      name: 'web_search' | 'web_fetch' | string
+      query?: string
+      url?: string
+    }
   | { type: 'result'; id: string; ok: boolean; detail?: string }
   | { type: 'citation'; url: string; title: string }
 
 interface ClaudeStreamEventJson {
   index: number
-  content_block?: { type?: string; id?: string; name?: string; tool_use_id?: string; content?: unknown }
+  content_block?: {
+    type?: string
+    id?: string
+    name?: string
+    tool_use_id?: string
+    content?: unknown
+  }
   delta?: { type?: string; partial_json?: string; citation?: { url?: unknown; title?: string } }
 }
 
@@ -176,7 +248,8 @@ function handleClaudeServerToolEvent(
   }
   if (event === 'content_block_delta' && json.delta?.type === 'citations_delta') {
     const citation = json.delta.citation
-    if (typeof citation?.url === 'string') emit({ type: 'citation', url: citation.url, title: citation.title || citation.url })
+    if (typeof citation?.url === 'string')
+      emit({ type: 'citation', url: citation.url, title: citation.title || citation.url })
     return
   }
   if (event === 'content_block_stop' && calls.has(json.index)) {
@@ -191,11 +264,16 @@ function handleClaudeServerToolEvent(
     emit({ type: 'call', id: call.id, name: call.name, query: input.query, url: input.url })
     return
   }
-  if (event === 'content_block_start' && (block?.type === 'web_search_tool_result' || block?.type === 'web_fetch_tool_result')) {
+  if (
+    event === 'content_block_start' &&
+    (block?.type === 'web_search_tool_result' || block?.type === 'web_fetch_tool_result')
+  ) {
     // Sucesso da busca: content é lista; erro (qualquer tool): objeto com error_code.
     const content = block.content
     const errorCode =
-      content && !Array.isArray(content) && typeof (content as { error_code?: unknown }).error_code === 'string'
+      content &&
+      !Array.isArray(content) &&
+      typeof (content as { error_code?: unknown }).error_code === 'string'
         ? (content as { error_code: string }).error_code
         : null
     const detail = errorCode
@@ -229,36 +307,49 @@ async function readSse(
   onEvent: (event: SseEvent) => void,
   signal: AbortSignal
 ): Promise<void> {
-  if (!response.body) throw new Error('O provedor não retornou um fluxo de resposta.')
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
+  if (!response.body)
+    throw new ProviderRequestError(
+      'O provedor não retornou um fluxo de resposta.',
+      502,
+      'stream_interrupted'
+    )
+  const reader = response.body.getReader(),
+    decoder = new TextDecoder()
   let buffer = ''
-
-  signal.addEventListener('abort', () => reader.cancel().catch(() => undefined))
-
-  for (;;) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    buffer = buffer.replace(/\r\n/g, '\n')
-
-    let separatorIndex: number
-    while ((separatorIndex = buffer.indexOf('\n\n')) !== -1) {
-      const rawEvent = buffer.slice(0, separatorIndex)
-      buffer = buffer.slice(separatorIndex + 2)
-
-      let event: string | undefined
-      const dataLines: string[] = []
-      for (const line of rawEvent.split('\n')) {
-        if (line.startsWith('event:')) event = line.slice(6).trim()
-        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
-      }
-      if (dataLines.length) onEvent({ event, data: dataLines.join('\n') })
-    }
+  const abort = () => {
+    void reader.cancel().catch(() => undefined)
   }
-  if (buffer.trim()) {
-    const dataLines = buffer.split('\n').filter((line) => line.startsWith('data:'))
-    if (dataLines.length) onEvent({ data: dataLines.map((line) => line.slice(5).trim()).join('\n') })
+  const receive = (raw: string) => {
+    let event: string | undefined
+    const data: string[] = []
+    for (const line of raw.split('\n')) {
+      if (line.startsWith('event:')) event = line.slice(6).trim()
+      else if (line.startsWith('data:')) data.push(line.slice(5).trim())
+    }
+    if (data.length) onEvent({ event, data: data.join('\n') })
+  }
+  signal.addEventListener('abort', abort, { once: true })
+  try {
+    for (;;) {
+      signal.throwIfAborted()
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      buffer = buffer.replace(/\r\n/g, '\n')
+      let at: number
+      while ((at = buffer.indexOf('\n\n')) >= 0) {
+        const raw = buffer.slice(0, at)
+        buffer = buffer.slice(at + 2)
+        receive(raw)
+      }
+    }
+    buffer += decoder.decode()
+    if (buffer.trim()) receive(buffer)
+    signal.throwIfAborted()
+  } finally {
+    signal.removeEventListener('abort', abort)
+    await reader.cancel?.().catch(() => undefined)
+    reader.releaseLock?.()
   }
 }
 
@@ -283,9 +374,11 @@ async function streamOpenAi(args: StreamChatArgs): Promise<void> {
   })
 
   if (!response.ok) {
-    throw new Error(`OpenAI ${response.status}: ${await response.text()}`)
+    throw await providerHttpError(response, 'OpenAI')
   }
 
+  let received = false,
+    completed = false
   let reason: FinishReason = 'stop'
   let inputTokens: number | null = null
   let outputTokens: number | null = null
@@ -293,13 +386,18 @@ async function streamOpenAi(args: StreamChatArgs): Promise<void> {
   await readSse(
     response,
     ({ data }) => {
-      if (data === '[DONE]') return
+      if (data === '[DONE]') {
+        completed = true
+        return
+      }
       try {
         const json = JSON.parse(data)
+        received = true
         const delta = json.choices?.[0]?.delta?.content
         if (typeof delta === 'string') args.onDelta(delta)
 
         const finishReason = json.choices?.[0]?.finish_reason
+        if (finishReason) completed = true
         if (finishReason === 'length') reason = 'length'
         else if (finishReason && finishReason !== 'stop') reason = 'other'
 
@@ -314,6 +412,12 @@ async function streamOpenAi(args: StreamChatArgs): Promise<void> {
     args.signal
   )
 
+  if (received && !completed)
+    throw new ProviderRequestError(
+      'OpenAI: conexão encerrada antes da conclusão.',
+      502,
+      'stream_interrupted'
+    )
   args.onFinish?.({ reason, inputTokens, outputTokens })
 }
 
@@ -335,9 +439,11 @@ async function streamGemini(args: StreamChatArgs): Promise<void> {
   })
 
   if (!response.ok) {
-    throw new Error(`Gemini ${response.status}: ${await response.text()}`)
+    throw await providerHttpError(response, 'Gemini')
   }
 
+  let received = false,
+    completed = false
   let reason: FinishReason = 'stop'
   let inputTokens: number | null = null
   let outputTokens: number | null = null
@@ -347,10 +453,12 @@ async function streamGemini(args: StreamChatArgs): Promise<void> {
     ({ data }) => {
       try {
         const json = JSON.parse(data)
+        received = true
         const text = json.candidates?.[0]?.content?.parts?.[0]?.text
         if (typeof text === 'string') args.onDelta(text)
 
         const finishReason = json.candidates?.[0]?.finishReason
+        if (finishReason) completed = true
         if (finishReason === 'MAX_TOKENS') reason = 'length'
         else if (finishReason && finishReason !== 'STOP') reason = 'other'
 
@@ -365,6 +473,12 @@ async function streamGemini(args: StreamChatArgs): Promise<void> {
     args.signal
   )
 
+  if (received && !completed)
+    throw new ProviderRequestError(
+      'Gemini: conexão encerrada antes da conclusão.',
+      502,
+      'stream_interrupted'
+    )
   args.onFinish?.({ reason, inputTokens, outputTokens })
 }
 
@@ -402,9 +516,11 @@ async function streamClaude(args: StreamChatArgs): Promise<void> {
   }
 
   if (!response.ok) {
-    throw new Error(`Claude ${response.status}: ${await response.text()}`)
+    throw await providerHttpError(response, 'Claude')
   }
 
+  let received = false,
+    completed = false
   let reason: FinishReason = 'stop'
   let inputTokens: number | null = null
   let outputTokens: number | null = null
@@ -417,10 +533,16 @@ async function streamClaude(args: StreamChatArgs): Promise<void> {
     ({ event, data }) => {
       if (event === 'error') {
         const detail = JSON.parse(data)
-        throw new Error(`Claude: ${detail.error?.message ?? 'erro durante a geração da resposta'}`)
+        throw new ProviderRequestError(
+          `Claude: ${detail.error?.message ?? 'erro durante a geração da resposta'}`,
+          0,
+          detail.error?.type ?? 'api_error'
+        )
       }
       try {
         const json = JSON.parse(data)
+        received = true
+        if (event === 'message_stop' || json.type === 'message_stop') completed = true
 
         // text_delta é a resposta; thinking_delta é o resumo do raciocínio, entregue à
         // parte. Blocos "fallback" do roteamento server-side e signature_delta são ignorados.
@@ -432,7 +554,10 @@ async function streamClaude(args: StreamChatArgs): Promise<void> {
         if (event === 'content_block_delta') {
           if (json.delta?.type === 'text_delta' && typeof json.delta.text === 'string') {
             args.onDelta(json.delta.text)
-          } else if (json.delta?.type === 'thinking_delta' && typeof json.delta.thinking === 'string') {
+          } else if (
+            json.delta?.type === 'thinking_delta' &&
+            typeof json.delta.thinking === 'string'
+          ) {
             args.onThinking?.({ type: 'delta', text: json.delta.thinking })
           }
         }
@@ -441,7 +566,8 @@ async function streamClaude(args: StreamChatArgs): Promise<void> {
           args.onThinking?.({ type: 'stop' })
         }
 
-        if (args.onServerTool) handleClaudeServerToolEvent(event, json, serverToolCalls, args.onServerTool)
+        if (args.onServerTool)
+          handleClaudeServerToolEvent(event, json, serverToolCalls, args.onServerTool)
 
         if (event === 'message_start') {
           // Com prompt caching, input_tokens conta só a parte fora do cache; somamos
@@ -478,20 +604,58 @@ async function streamClaude(args: StreamChatArgs): Promise<void> {
     args.signal
   )
 
+  if (received && !completed)
+    throw new ProviderRequestError(
+      'Claude: conexão encerrada antes da conclusão.',
+      502,
+      'stream_interrupted'
+    )
   args.onFinish?.({ reason, inputTokens, outputTokens })
 }
 
 export async function streamChat(args: StreamChatArgs): Promise<void> {
-  switch (args.provider) {
-    case 'openai':
-      return streamOpenAi(args)
-    case 'gemini':
-      return streamGemini(args)
-    case 'claude':
-      return streamClaude(args)
-    default:
-      throw new Error(`Provedor desconhecido: ${args.provider}`)
-  }
+  let visible = ''
+  await recoverProvider(
+    async (attempt) => {
+      const messages: ChatTurn[] =
+        attempt > 0 && visible
+          ? [
+              ...args.messages,
+              { role: 'assistant', content: visible },
+              {
+                role: 'user',
+                content:
+                  'A conexão foi interrompida. Continue exatamente de onde a resposta parou, sem repetir o texto anterior.'
+              }
+            ]
+          : args.messages
+      const request = {
+        ...args,
+        messages,
+        onDelta: (text: string) => {
+          visible += text
+          args.onDelta(text)
+        }
+      }
+      switch (args.provider) {
+        case 'openai':
+          return streamOpenAi(request)
+        case 'gemini':
+          return streamGemini(request)
+        case 'claude':
+          return streamClaude(request)
+        default:
+          throw new Error(`Provedor desconhecido: ${args.provider}`)
+      }
+    },
+    {
+      signal: args.signal,
+      onRetry: (event) => {
+        args.onThinking?.({ type: 'stop' })
+        args.onRetry?.(event)
+      }
+    }
+  )
 }
 
 export interface AgentCatalogEntry {

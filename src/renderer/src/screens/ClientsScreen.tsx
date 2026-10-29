@@ -1,3 +1,4 @@
+import { legacyExtraction, readCompleteClientFile } from '@renderer/lib/clientFolderContext'
 import { isEfModule } from '@renderer/lib/efDrive'
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { createPortal } from 'react-dom'
@@ -62,6 +63,9 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
   const [knowledgeProject, setKnowledgeProject] = useState<ProjectSummary | null>(null)
   const [deletingClient, setDeletingClient] = useState<Client | null>(null)
   const [busy, setBusy] = useState(false)
+  const [repairingText, setRepairingText] = useState(false)
+  const fileScope = useRef('')
+  fileScope.current = JSON.stringify([user?.id, clientId, moduleId, folderId])
   const [dialogError, setDialogError] = useState<string | null>(null)
   const [editor, setEditor] = useState<{
     mode: 'client-new' | 'client-edit' | 'module-new' | 'module-edit'
@@ -217,6 +221,26 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
     setWorkbook(await file.text())
     setEditingWorkbook(true)
     event.target.value = ''
+  }
+  async function repairText(): Promise<void> {
+    if (!user || !clientId || !moduleId || repairingText) return
+    const scope = fileScope.current
+    const pending = files.filter(file => file.folder_id === folderId && legacyExtraction(file.content))
+    setRepairingText(true)
+    let recovered = 0, memoryOnly = 0
+    const errors: string[] = []
+    try {
+      for (const file of pending) {
+        if (fileScope.current !== scope) break
+        try {
+          const result = await readCompleteClientFile(clientId, moduleId, file.id, user.id)
+          if (fileScope.current !== scope) break
+          recovered++; if (!result.persisted) memoryOnly++
+          setFiles(current => current.map(row => row.id === file.id ? { ...row, content: result.content } : row))
+        } catch (error) { errors.push(error instanceof Error ? error.message : String(error)) }
+      }
+      if (fileScope.current === scope) setMessage(`Texto completo recuperado: ${recovered} arquivo(s).${memoryOnly ? ` ${memoryOnly} disponível(is) apenas nesta leitura; sem permissão para atualizar o cadastro.` : ''}${errors.length ? ` Falhas: ${errors.join('; ')}` : ''}`)
+    } finally { setRepairingText(false) }
   }
   async function upload(event: ChangeEvent<HTMLInputElement>): Promise<void> {
     const selected = event.target.files?.[0]
@@ -536,6 +560,7 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
               <div className="clients-section-heading">
                 <h3>Arquivos <small className="clients-count">{visibleFiles.length}</small></h3>
                 <div className="clients-file-actions">
+                  {files.some(file => file.folder_id === folderId && legacyExtraction(file.content)) && <button disabled={repairingText} onClick={() => void repairText()} title="Recuperar o texto integral dos originais desta pasta">{repairingText ? 'Recuperando texto…' : 'Recuperar texto completo'}</button>}
                   <button onClick={() => setFolderName('')}><FolderPlus size={14} /> Nova pasta</button>
                   <label className="clients-upload">
                     <Upload size={14} /> Enviar arquivo

@@ -1,3 +1,4 @@
+import type { WorkProgress } from '@renderer/lib/workProgress'
 import { memo, useRef } from 'react'
 import { Archive, Bot, FileText, Globe, RefreshCw } from 'lucide-react'
 import { Markdown } from './Markdown'
@@ -30,6 +31,7 @@ export interface ToolActivityItem {
   /** web = pesquisa/leitura via server tools do Claude; source = fonte citada na resposta. */
   kind: 'skill' | 'mcp' | 'sap' | 'web' | 'source' | 'document' | 'local' | 'compact'
   status: 'running' | 'confirm' | 'done' | 'error'
+  workProgress?: WorkProgress
   url?: string
   efDocument?: EfDocumentJob
   localSearch?: LocalSearchActivity
@@ -164,7 +166,7 @@ export const ChatMessageItem = memo(function ChatMessageItem({
           {message.toolActivity?.some((item) => item.kind === 'compact' && item.status === 'running') && <div className="context-compacting" role="status"><Archive size={20} className="context-spin" /><div><strong>Compactando contexto</strong><small>{message.toolActivity.find((item) => item.kind === 'compact' && item.status === 'running')?.label} · histórico original preservado</small></div></div>}
           {!!message.knowledge?.length && <details className="ai-tool-details"><summary><FileText size={13} /> Contexto consultado · {message.knowledge.length} trechos</summary><div className="ai-knowledge-cards">{message.knowledge.map((match, index) => <article key={`${match.documentId}-${index}`}><strong>{match.documentName}</strong><small>Versão {match.version} · {new Date(match.updatedAt).toLocaleDateString('pt-BR')} · relevância {Math.round(match.confidence * 100)}%</small><p>{match.excerpt}</p></article>)}</div></details>}
           {message.toolActivity?.some((item) => item.kind !== 'source' || item.id === 'local-enhancements') && (
-            <ToolActivityBadges items={message.toolActivity.map((item) => item.id === 'local-enhancements' && item.kind === 'source' ? { ...item, kind: 'local' } : item)} />
+            <ToolActivityBadges interrupted={Boolean(message.error) && !message.streaming} items={message.toolActivity.map((item) => item.id === 'local-enhancements' && item.kind === 'source' ? { ...item, kind: 'local' } : item)} />
           )}
           {(message.thinkingSince !== undefined || message.thinkingMs !== undefined) && (
             <ThinkingBlock activeSince={message.thinkingSince} text={message.thinkingText} ms={message.thinkingMs} />

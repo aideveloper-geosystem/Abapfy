@@ -1,5 +1,7 @@
+import { applySourceEdits, selectSapSource, sapSourceCatalog } from './sapAdtSources'
 import { ADTClient, session_types, objectPath as createdObjectPath } from 'abap-adt-api'
 import { createHash } from 'node:crypto'
+import { sapAdtFailure } from './sapAdtErrors'
 import { advancedDefinition, advancedAllowed } from '../shared/sapAdtAdvanced'
 import { sapAdtPath, type SapAdtConnection } from '../shared/sapAdt'
 export class SapAdtActionError extends Error {}
@@ -11,11 +13,41 @@ export interface AdvancedContext {
   signal: AbortSignal
   approve: (detail: string) => Promise<void>
   known: (path: string) => void
-  hasSnapshot: (path: string, version: string, hash: string) => boolean
+  hasSnapshot: (path: string, version: string, hash: string, sourcePath?: string) => boolean
   invalidate: (path: string) => void
   registerObject: (path: string) => void
   atcRuns: Set<string>
 }
+
+function isNotFound(error: unknown): boolean {
+  const e = error as { err?: number; status?: number; response?: { status?: number } }
+  return [e.err, e.status, e.response?.status].includes(404)
+}
+function hasSyntaxErrors(findings: Array<{ severity: string }>): boolean {
+  return findings.some((finding) =>
+    ['E', 'A', 'ERROR', 'ABORT'].includes(finding.severity.toUpperCase())
+  )
+}
+async function checkSource(
+  client: ADTClient,
+  connection: SapAdtConnection,
+  include: string,
+  objectPath: string,
+  source: string
+) {
+  if (!connection.allowQuality)
+    return {
+      status: 'not_authorized',
+      message: 'Habilite validação de sintaxe/qualidade para conferir a fonte salva.'
+    }
+  try {
+    const findings = await client.syntaxCheck(include, objectPath, source, undefined, 'inactive')
+    return { status: hasSyntaxErrors(findings) ? 'syntax_errors' : 'syntax_valid', findings }
+  } catch (error) {
+    return { status: 'check_failed', message: sapAdtFailure(error).message }
+  }
+}
+
 const text = (a: Record<string, unknown>, key: string): string => a[key] as string
 export async function editableRequest(client: ADTClient, request: string) {
   const details = await client.transportDetails(request)
@@ -42,36 +74,88 @@ export async function runSapAdtAdvanced(
   const path = typeof a.objectPath === 'string' ? a.objectPath : undefined
   if (path) ctx.known(path)
   ctx.signal.throwIfAborted()
-  if (name === 'edit_source' || name === 'activate_object') {
+  if (name === 'edit_source' || name === 'preview_edits' || name === 'activate_object') {
     const version =
       name === 'activate_object' ? 'inactive' : (text(a, 'version') as 'active' | 'inactive')
     const expected = text(a, 'expectedHash')
-    if (!ctx.hasSnapshot(path!, version, expected))
+    const structure = await client.objectStructure(path!, version)
+    const include = selectSapSource(structure, a.sourcePath as string | undefined)
+    if (!ctx.hasSnapshot(path!, version, expected, include))
       throw new SapAdtActionError(
         'Leia a versão correspondente nesta mensagem e use o sourceHash retornado antes de alterar/ativar.'
       )
-    const structure = await client.objectStructure(path!, version)
-    const include = sapAdtPath(ADTClient.mainInclude(structure))
     const before = await client.getObjectSource(include, { version })
     if (sourceHash(before) !== expected)
       throw new SapAdtActionError(
         'A fonte SAP mudou desde a leitura. Leia novamente; nenhuma gravação foi solicitada.'
       )
+    const activationSources: Array<{ sourcePath: string; hash: string | null }> = []
+    if (name === 'activate_object') {
+      for (const source of sapSourceCatalog(structure)) {
+        let inactive: string
+        try {
+          inactive =
+            source.sourcePath === include
+              ? before
+              : await client.getObjectSource(source.sourcePath, { version: 'inactive' })
+        } catch (error) {
+          if (isNotFound(error)) {
+            activationSources.push({ sourcePath: source.sourcePath, hash: null })
+            continue
+          }
+          throw error
+        }
+        const hash = sourceHash(inactive)
+        if (!ctx.hasSnapshot(path!, 'inactive', hash, source.sourcePath)) {
+          let active: string | undefined
+          try {
+            active = await client.getObjectSource(source.sourcePath, { version: 'active' })
+          } catch (error) {
+            if (!isNotFound(error)) throw error
+          }
+          if (active !== inactive)
+            throw new SapAdtActionError(
+              'Outra fonte do objeto possui alterações inativas ainda não revisadas: ' +
+                source.sourcePath +
+                '. Leia todas as fontes alteradas antes de ativar.'
+            )
+        }
+        activationSources.push({ sourcePath: source.sourcePath, hash })
+      }
+    }
     let after = before
-    if (name === 'edit_source') {
-      const oldText = text(a, 'oldText')
-      if (before.indexOf(oldText) < 0 || before.indexOf(oldText) !== before.lastIndexOf(oldText))
-        throw new SapAdtActionError(
-          'O texto original deve corresponder a exatamente uma ocorrência na fonte.'
-        )
-      after = before.replace(oldText, () => text(a, 'newText'))
-      if (after === before) throw new SapAdtActionError('A alteração não modifica a fonte.')
+    let changes: ReturnType<typeof applySourceEdits>['changes'] = []
+    if (name === 'edit_source' || name === 'preview_edits') {
+      let prepared: ReturnType<typeof applySourceEdits>
+      try {
+        prepared = applySourceEdits(before, a)
+      } catch (error) {
+        throw new SapAdtActionError(error instanceof Error ? error.message : String(error))
+      }
+      after = prepared.after
+      changes = prepared.changes
+      if (name === 'preview_edits')
+        return {
+          status: 'proposed',
+          objectPath: path,
+          sourcePath: include,
+          version,
+          expectedHash: expected,
+          proposedHash: sourceHash(after),
+          changes: changes.map(({ startLine, oldText, newText }) => ({
+            startLine,
+            oldText,
+            newText
+          })),
+          saved: false,
+          activated: false
+        }
       await ctx.approve(
-        `Editar fonte ${version} e salvar como INATIVA\nObjeto: ${path}\nRequest: ${a.transport}\nHash anterior: ${expected}\n\n--- Trecho original\n${oldText}\n\n+++ Trecho proposto\n${a.newText}\n\nNão haverá ativação automática.`
+        `Editar fonte ${version} e salvar como INATIVA\nObjeto: ${path}\nFonte: ${include}\nRequest: ${a.transport}\nHash anterior: ${expected}\n\n${changes.map((change) => `@@ linha ${change.startLine} @@\n--- Original\n${change.oldText}\n+++ Proposta\n${change.newText}`).join('\n\n')}\n\nNão haverá ativação automática.`
       )
     } else
       await ctx.approve(
-        `ATIVAR objeto ${structure.metaData['adtcore:name']}\n${path}\nHash da fonte inativa: ${expected}\nA versão ativa/executável será alterada.`
+        `ATIVAR objeto ${structure.metaData['adtcore:name']}\n${path}\nFonte conferida: ${include}\nHash da fonte inativa: ${expected}\nFontes que serão conferidas: ${JSON.stringify(activationSources)}\nA ativação é do objeto inteiro. A versão ativa/executável será alterada.`
       )
     ctx.signal.throwIfAborted()
     await stateful(client)
@@ -123,22 +207,82 @@ export async function runSapAdtAdvanced(
         )
         const verified = await client.getObjectSource(include, { version: 'inactive' })
         ctx.invalidate(path!)
+        const validation =
+          verified === after
+            ? await checkSource(client, ctx.connection, include, path!, verified)
+            : { status: 'not_checked' }
         outcome = {
+          validation,
           status: verified === after ? 'saved_inactive' : 'uncertain',
           objectPath: path,
+          sourcePath: include,
+          changes: changes.length,
           sourceHash: sourceHash(verified),
           verified: verified === after,
           activated: false,
           transport: a.transport
         }
       } else {
+        const freshStructure = await client.objectStructure(path!, 'inactive')
+        const currentSources = sapSourceCatalog(freshStructure)
+        if (
+          currentSources.length !== activationSources.length ||
+          currentSources.some(
+            (source) =>
+              !activationSources.some((previous) => previous.sourcePath === source.sourcePath)
+          )
+        )
+          throw new SapAdtActionError(
+            'A estrutura de fontes mudou antes da ativação. Revise novamente.'
+          )
+        for (const source of activationSources) {
+          if (source.hash === null) {
+            try {
+              await client.getObjectSource(source.sourcePath, { version: 'inactive' })
+            } catch (error) {
+              if (isNotFound(error)) continue
+              throw error
+            }
+            throw new SapAdtActionError(
+              'Uma nova fonte inativa surgiu antes da ativação: ' + source.sourcePath
+            )
+          }
+          if (
+            sourceHash(await client.getObjectSource(source.sourcePath, { version: 'inactive' })) !==
+            source.hash
+          )
+            throw new SapAdtActionError(
+              'Uma fonte inativa mudou antes da ativação: ' + source.sourcePath
+            )
+          const validation = await checkSource(
+            client,
+            ctx.connection,
+            source.sourcePath,
+            path!,
+            await client.getObjectSource(source.sourcePath, { version: 'inactive' })
+          )
+          if (validation.status === 'syntax_errors' || validation.status === 'check_failed')
+            throw new SapAdtActionError(
+              'A validação não permitiu ativar ' +
+                source.sourcePath +
+                '. Execute syntax_check, corrija os erros e revise novamente.'
+            )
+        }
         attempted = true
         const activation = await client.activate(structure.metaData['adtcore:name'], path!, include)
         const verified = await client.getObjectSource(include, { version: 'active' })
+        let allVerified = sourceHash(verified) === expected
+        for (const source of activationSources.filter((source) => source.hash !== null))
+          allVerified =
+            sourceHash(await client.getObjectSource(source.sourcePath, { version: 'active' })) ===
+              source.hash && allVerified
         ctx.invalidate(path!)
         outcome = {
-          status: sourceHash(verified) === expected ? 'activated' : 'activation_not_verified',
-          verified: sourceHash(verified) === expected,
+          sources: activationSources,
+          status: allVerified ? 'activated' : 'activation_not_verified',
+          objectPath: path,
+          sourcePath: include,
+          verified: allVerified,
           activation,
           sourceHash: sourceHash(verified)
         }
@@ -148,6 +292,8 @@ export async function runSapAdtAdvanced(
       else
         outcome = {
           status: 'uncertain',
+          objectPath: path,
+          sourcePath: include,
           operationAttempted: true,
           message:
             'A operação foi enviada, mas seu resultado não pôde ser confirmado. Não repetir automaticamente; releia a fonte e o estado do objeto.'
@@ -232,7 +378,14 @@ export async function runSapAdtAdvanced(
     const structure = await client.objectStructure(path!, version)
     const include = sapAdtPath(ADTClient.mainInclude(structure))
     const source = await client.getObjectSource(include, { version })
-    return client.syntaxCheck(include, path!, source, undefined, version)
+    const findings = await client.syntaxCheck(include, path!, source, undefined, version)
+    return {
+      objectPath: path,
+      sourcePath: include,
+      version,
+      status: hasSyntaxErrors(findings) ? 'syntax_errors' : 'syntax_valid',
+      findings
+    }
   }
   if (name === 'unit_tests')
     return client.unitTestRun(path!, {

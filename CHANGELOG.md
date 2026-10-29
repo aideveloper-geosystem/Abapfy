@@ -6,6 +6,34 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.9] - 2026-10-29
+
+### Sessões e recuperação automática
+
+- Corrigido o encerramento da sessão após falhas temporárias como Claude Overloaded. O chat tenta recuperar a chamada ao modelo, com espera progressiva e até cinco novas tentativas, mantendo o progresso e os resultados das ferramentas.
+- A resposta final produzida durante o trabalho é utilizada diretamente, evitando uma segunda geração que reprocessava o mesmo contexto.
+- Continuação de pausas do provedor e respostas longas, com preservação dos blocos de raciocínio e ferramentas. O contexto de trabalho pode ser reorganizado automaticamente durante a execução.
+- Cancelamento também interrompe a espera por uma nova tentativa. Operações de ferramentas já executadas não são repetidas para recuperar a conexão; gravações SAP incertas continuam exigindo conferência.
+- Atividades interrompidas ou com pendências deixam de aparecer como concluídas. Progresso e posições de leitura ficam disponíveis para retomar a tarefa.
+
+### Arquivos do cliente
+
+- Texto extraído integral, com catálogo paginado, busca literal e leitura por partes dos arquivos da pasta selecionada e suas subpastas, sem os cortes fixos anteriores de 60 mil caracteres por arquivo e 120 mil por pasta.
+- Recuperação de extrações antigas a partir do original armazenado, automaticamente durante a leitura ou pela ação Recuperar texto completo. Arquivos sem original disponível apresentam diagnóstico para reenvio.
+- Leituras informam revisão, linhas e continuação. Anexos completos permanecem no histórico e são consultados sob demanda, com isolamento por conta, cliente, módulo e pasta.
+
+### Desenvolvimento SAP ADT
+
+- Navegação pelas fontes e includes retornados pela estrutura do objeto, com seleção da fonte para leitura, proposta, edição e validação.
+- Propostas e gravação de várias substituições independentes na mesma fonte, sob revisão, hash, request/tarefa e lock. Alterações ambíguas ou sobrepostas são rejeitadas.
+- Quando autorizada, a checagem de sintaxe acompanha o salvamento da versão inativa. A ativação confere as fontes inativas do objeto e permanece uma operação aprovada separadamente.
+- Diagnóstico de permissões e conflitos mais claro, preservando a conexão SAP selecionada e as autorizações por agente.
+
+### Compatibilidade e validação
+
+- Nenhuma nova migração de banco é necessária. Conexões e permissões SAP existentes são preservadas.
+- 186 testes automatizados, typecheck, lint e build local verificados; teste em desenvolvimento confirmado pelo usuário. Operações ADT continuam sujeitas aos serviços e autorizações do ambiente SAP.
+
 ## [1.0.8] - 2026-10-23
 
 ### Especificações Funcionais

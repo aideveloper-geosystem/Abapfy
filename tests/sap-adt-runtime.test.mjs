@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { loadTs } from './load-typescript.mjs'
-function fixture(provider = 'openai', fail = false) {
+function fixture(provider = 'openai', fail = false, onCall) {
   const calls = [],
     requests = []
   let round = 0
@@ -43,6 +43,7 @@ function fixture(provider = 'openai', fail = false) {
             },
             callTool: async (...args) => {
               calls.push(['call', ...args])
+              if (onCall) return onCall(...args)
               return { result: { objects: [{ name: 'ZCL_TEST' }] } }
             },
             endTurn: async (id) => {
@@ -115,6 +116,7 @@ function fixture(provider = 'openai', fail = false) {
   }
   return {
     module,
+    tool,
     calls,
     requests,
     args,
@@ -192,7 +194,7 @@ test('missing agent binding is shown exactly and never silently falls back to a 
   })
   assert.match(result, /agente não está autorizado/)
   assert.equal(f.requests.length, 0)
-  assert.equal(events[0].status, 'error')
+  assert.equal(events.find((event) => event.serverName === 'SAP ADT').status, 'error')
   assert.equal(f.calls.at(-1)[0], 'end')
 })
 test('selected connection diagnostics are explicit and no-call results never claim SAP access', async () => {
@@ -217,4 +219,33 @@ test('selected connection diagnostics are explicit and no-call results never cla
     f.calls.some((call) => call[0] === 'call'),
     false
   )
+})
+
+test('interrupted SAP mutations retain an uncertain receipt and revoke the turn without replay', async () => {
+  const controller = new AbortController(),
+    progress = []
+  const f = fixture('openai', false, () => {
+    controller.abort()
+    throw new DOMException('Interrupted', 'AbortError')
+  })
+  f.tool.name = 'edit_source'
+  await assert.rejects(
+    f.module.runMcpToolLoop({
+      ...f.args,
+      signal: controller.signal,
+      sapAdt: {
+        connectionId: 'selected-connection',
+        token: 'private-auth-token',
+        userId: 'test-user',
+        agent: { source: 'default', id: 'abap' }
+      },
+      progress: { scope: 'scope', notes: '', steps: [] },
+      onProgress: (value) => progress.push(value)
+    }),
+    /Interrupted/
+  )
+  assert.equal(progress.at(-1).steps.at(-1).status, 'uncertain')
+  assert.match(progress.at(-1).steps.at(-1).error, /confira a fonte/)
+  assert.equal(f.calls.filter((call) => call[0] === 'call').length, 1)
+  assert.equal(f.calls.at(-1)[0], 'end')
 })
