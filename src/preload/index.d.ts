@@ -110,6 +110,7 @@ export interface McpPromptInfo {
 export interface McpConfirmationPending {
   callId: string
   kind: 'server' | 'tool'
+  scope?: 'session'
   serverName: string
   toolName?: string
   detail: string

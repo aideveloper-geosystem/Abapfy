@@ -10,6 +10,8 @@ import {
   Shield,
   UserRound,
   Search,
+  Settings2,
+  Workflow,
   X
 } from 'lucide-react'
 import { GeneralSection } from './GeneralSection'
@@ -20,11 +22,15 @@ import { UpdatesSection } from './UpdatesSection'
 import { IntegrationsSection } from './IntegrationsSection'
 import { AdministrationSection } from './AdministrationSection'
 import { FeaturesSection } from './FeaturesSection'
+import { FlowPreferencesSection } from './FlowPreferencesSection'
+import { useSettingsStore } from '@renderer/store/settingsStore'
 import { CatalogAdministration } from './CatalogAdministration'
 import { useAuthStore } from '@renderer/store/authStore'
 import './SettingsModal.css'
 
 type SectionId =
+  | 'overview'
+  | 'flows'
   | 'profile'
   | 'general'
   | 'ai'
@@ -37,32 +43,37 @@ type SectionId =
   | 'embeddings'
 
 const SECTIONS: { id: SectionId; label: string; icon: typeof Palette; group: string }[] = [
-  { id: 'profile', label: 'Perfil', icon: UserRound, group: 'Pessoal' },
-  { id: 'general', label: 'Aparência', icon: Palette, group: 'Pessoal' },
-  { id: 'ai', label: 'Inteligência Artificial', icon: Bot, group: 'Trabalho' },
-  { id: 'features', label: 'Features', icon: SlidersHorizontal, group: 'Trabalho' },
-  { id: 'mcp', label: 'Integrações', icon: Server, group: 'Trabalho' },
-  { id: 'parametros', label: 'Parâmetros', icon: SlidersHorizontal, group: 'Trabalho' },
+  { id: 'overview', label: 'Geral', icon: Settings2, group: 'Pessoais' },
+  { id: 'profile', label: 'Perfil', icon: UserRound, group: 'Pessoais' },
+  { id: 'general', label: 'Aparência', icon: Palette, group: 'Pessoais' },
+  { id: 'ai', label: 'Modelos e provedores', icon: Bot, group: 'Inteligência artificial' },
+  { id: 'features', label: 'Contexto e compactação', icon: SlidersHorizontal, group: 'Inteligência artificial' },
+  { id: 'mcp', label: 'SAP ADT e MCP', icon: Server, group: 'Integrações' },
+  { id: 'parametros', label: 'Parâmetros', icon: SlidersHorizontal, group: 'Workspace' },
   { id: 'clients', label: 'Clientes', icon: Building2, group: 'Workspace' },
-  { id: 'embeddings', label: 'Embeddings', icon: Database, group: 'Workspace' },
   { id: 'administration', label: 'Administração', icon: Shield, group: 'Workspace' },
+  { id: 'flows', label: 'Preferências de fluxos', icon: Workflow, group: 'Avançado' },
+  { id: 'embeddings', label: 'Embeddings', icon: Database, group: 'Avançado' },
   { id: 'updates', label: 'Atualizações', icon: Download, group: 'Sistema' }
 ]
 
 interface SettingsModalProps {
   open: boolean
-  initialSection?: 'mcp'
+  initialSection?: 'mcp' | 'flows'
   onClose: () => void
   onOpenClients: () => void
+  onOpenFlows: () => void
 }
 
 export function SettingsModal({
   open,
   initialSection,
   onClose,
-  onOpenClients
+  onOpenClients,
+  onOpenFlows
 }: SettingsModalProps): JSX.Element | null {
-  const [activeSection, setActiveSection] = useState<SectionId>('profile')
+  const [activeSection, setActiveSection] = useState<SectionId>('overview')
+  const defaultModel = useSettingsStore(state => state.defaultModel)
   const role = useAuthStore((state) => state.role)
   const refreshRole = useAuthStore((state) => state.refreshRole)
   const canManageCatalog = role === 'MASTER' || role === 'ADMIN'
@@ -71,7 +82,7 @@ export function SettingsModal({
   const visibleSections = SECTIONS.filter(
     (section) =>
       (section.id !== 'embeddings' || canManageCatalog) &&
-      `${section.label} ${section.group} ${section.id === 'mcp' ? 'SAP ADT MCP conexões agentes' : ''} ${section.id === 'embeddings' ? 'catálogo SAP BAdI BAPI indexação' : ''}`
+      `${section.label} ${section.group} ${section.id === 'flows' ? 'subagents orquestrador fluxo equipe automação avançado hooks Opus Sonnet Haiku' : ''} ${section.id === 'features' ? 'features histórico tokens' : ''} ${section.id === 'ai' ? 'inteligência artificial API chaves comportamento ferramentas' : ''} ${section.id === 'mcp' ? 'SAP ADT MCP conexões agentes integrações' : ''} ${section.id === 'embeddings' ? 'catálogo SAP BAdI BAPI indexação' : ''}`
         .toLocaleLowerCase('pt-BR')
         .includes(query.trim().toLocaleLowerCase('pt-BR'))
   )
@@ -137,10 +148,26 @@ export function SettingsModal({
             )}
           </div>
         </nav>
-        <div className="settings-content">
           <button type="button" className="settings-close" onClick={onClose} aria-label="Fechar">
             <X size={17} strokeWidth={1.75} />
           </button>
+        <div className="settings-content" key={activeSection}>
+          {activeSection === 'overview' && <div className="settings-section settings-overview">
+            <header className="settings-section-header"><h2>Geral</h2><p>Seu ambiente de trabalho no Abapfy.</p></header>
+            <h3>Inteligência artificial</h3>
+            <div className="settings-overview-card">
+              <div><span><strong>Modelo padrão</strong><small>{defaultModel ?? 'Nenhum modelo selecionado'}</small></span><button className="settings-action" type="button" onClick={() => setActiveSection('ai')}>Configurar</button></div>
+              <div><span><strong>Contexto das conversas</strong><small>Histórico, compactação e limites de contexto.</small></span><button className="settings-action" type="button" onClick={() => setActiveSection('features')}>Gerenciar</button></div>
+            </div>
+            <h3>Conexões e personalização</h3>
+            <div className="settings-overview-card">
+              <div><span><strong>Ambientes SAP e servidores MCP</strong><small>Conexões, ferramentas e permissões por agente.</small></span><button className="settings-action" type="button" onClick={() => setActiveSection('mcp')}>Gerenciar</button></div>
+              <div><span><strong>Aparência</strong><small>Temas claros e escuros para o seu ambiente.</small></span><button className="settings-action" type="button" onClick={() => setActiveSection('general')}>Personalizar</button></div>
+            </div>
+            <h3>Recursos avançados</h3>
+            <div className="settings-overview-card"><div><span><strong>Fluxos de agentes</strong><small>Disponibilidade do recurso no chat. Monte suas equipes e etapas na área Fluxos.</small></span><button className="settings-action" type="button" onClick={() => setActiveSection('flows')}>Configurar</button></div></div>
+          </div>}
+          {activeSection === 'flows' && <FlowPreferencesSection onManage={() => { onClose(); onOpenFlows() }} />}
           {activeSection === 'profile' && <ProfileSection />}
           {activeSection === 'general' && <GeneralSection />}
           {activeSection === 'ai' && <AiSection />}

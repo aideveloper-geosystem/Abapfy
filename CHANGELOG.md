@@ -6,6 +6,35 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.10] - 2026-11-03
+
+### Fluxos de agentes e hooks
+
+- Fluxos avançados opcionais, ativados e selecionados manualmente no chat; o fluxo padrão permanece disponível.
+- Nova área Fluxos na sidebar para criar, duplicar e organizar equipes, orquestrador, etapas, hooks e limites por fluxo. Configurações reúne as preferências gerais.
+- Modelos, provedores, esforço, instruções e acesso às ferramentas configuráveis por agente, com execução paralela limitada e consolidação pelo orquestrador.
+- Etapas ordenadas, contexto independente por especialista, cancelamento, resultados parciais e contabilização das delegações e do consumo.
+- Oito hooks prontos para planejamento, escopo, evidências, revisão e conferência de alterações, com personalização por fluxo.
+- Aviso de maior consumo de tokens e custo ao habilitar ou utilizar fluxos avançados.
+
+### Interface
+
+- Configurações reorganizadas com navegação lateral e pesquisa.
+- Atividades do chat compactas, animações mais discretas e detalhes técnicos recolhidos.
+- Editor de fluxos separado em abas, com rodapé de salvamento fora da área de rolagem e espaçamento revisado.
+
+### SAP ADT e recuperação de ferramentas
+
+- Leituras ADT não solicitam confirmação; a autorização das operações que exigem consentimento vale para a sessão, respeitando as permissões e a conexão selecionada.
+- Recuperação de chamadas locais com prefixo SAP e retorno estruturado para ferramentas desconhecidas, preservando a investigação em andamento.
+- Tipos compostos de objetos aceitos na pesquisa e resolução de includes referenciados por fontes já consultadas, usando a navegação ADT.
+- Includes consultados passam a integrar o contexto de leitura; o resolvedor foi validado com respostas simuladas e ainda depende de validação no SAP real.
+
+### Compatibilidade
+
+- Nenhuma nova migração de banco é necessária. A configuração anterior de fluxo é preservada na biblioteca local da conta.
+- Diretórios temporários de testes e publicação deixam de aparecer como arquivos versionáveis.
+
 ## [1.0.9] - 2026-10-29
 
 ### Sessões e recuperação automática

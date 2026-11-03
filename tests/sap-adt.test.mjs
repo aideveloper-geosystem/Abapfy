@@ -138,6 +138,18 @@ function fixture(t) {
       calls.push({ kind: 'table', table, limit, decode, sql })
       return tableHook()
     }
+    async findDefinition(url, source, line, column, endColumn) {
+      calls.push({ kind: 'definition', url, line, column, endColumn })
+      return {
+        url: '/sap/bc/adt/programs/includes/%2flime%2flpi_coredei/source/main',
+        line: 1,
+        column: 0
+      }
+    }
+    async unitTestRun() {
+      calls.push({ kind: 'unit' })
+      return []
+    }
     async adtDiscovery() {
       return [{ title: 'Repository' }]
     }
@@ -186,8 +198,8 @@ function fixture(t) {
   const invoke = (name, ...args) => handlers.get('sapAdt:' + name)({ sender }, ...args)
   const save = (config = connection, password = 'test-secret') =>
     invoke('save', 'token', config, password)
-  const begin = (agent = { source: 'default', id: 'abap' }) =>
-    invoke('beginTurn', 'token', agent, userId, connection.id)
+  const begin = (agent = { source: 'default', id: 'abap' }, sessionId = 'chat-1') =>
+    invoke('beginTurn', 'token', agent, userId, connection.id, sessionId)
   const execute = (turn, name, args, callId = crypto.randomUUID()) =>
     invoke(
       'callTool',
@@ -269,7 +281,7 @@ test('agent permissions and enabled state determine the actual main-process tool
   const turn = await f.begin()
   assert.deepEqual(
     [...turn.tools.map((tool) => tool.name)],
-    ['search_objects', 'read_source', 'list_sources', 'read_table']
+    ['search_objects', 'read_source', 'list_sources', 'read_table', 'resolve_include']
   )
   assert.equal(
     turn.tools.some((tool) => /write|activate|delete|execute|sql/.test(tool.name)),
@@ -287,22 +299,13 @@ test('agent permissions and enabled state determine the actual main-process tool
   await assert.rejects(f.execute(turn, 'search_objects', { pattern: '*' }), /mudou|revogada/)
   assert.equal(f.calls.length, readCount)
 })
-test('table refusal sends no SAP traffic; approval shows exact scope and enforces the row cap', async (t) => {
+test('table reads never request confirmation and enforce the row cap', async (t) => {
   const f = fixture(t)
   await f.save()
   const turn = await f.begin()
-  f.setApproval(async (request) => {
-    assert.match(request.detail, /SELECT MATNR FROM MARA/)
-    assert.match(request.detail, /Mandante: 100/)
-    assert.match(request.detail, /Limite: 10/)
-    return false
+  f.setApproval(async () => {
+    assert.fail('Read requested confirmation')
   })
-  await assert.rejects(
-    f.execute(turn, 'read_table', { table: 'MARA', columns: ['MATNR'], limit: 200 }),
-    /recusada/
-  )
-  assert.equal(f.calls.length, 0)
-  f.setApproval(async () => true)
   const result = await f.execute(turn, 'read_table', {
     table: 'MARA',
     columns: ['MATNR'],
@@ -316,29 +319,61 @@ test('table refusal sends no SAP traffic; approval shows exact scope and enforce
   assert.equal(audit.includes('000000000000000001'), false)
   assert.equal(audit.includes('test-secret'), false)
 })
-test('configuration or logout changes while approval is open prevent SAP calls', async (t) => {
+test('execution consent persists across turns, isolates conversations and is revoked on configuration/logout', async (t) => {
   const f = fixture(t)
-  await f.save()
-  let turn = await f.begin()
-  f.setApproval(async () => {
-    await f.save({ ...connection, client: '200' })
+  const config = { ...connection, allowQuality: true }
+  await f.save(config)
+  let approvals = 0
+  f.setApproval(async (request) => {
+    approvals++
+    assert.match(request.detail, /sessão de conversa/)
     return true
   })
-  await assert.rejects(
-    f.execute(turn, 'read_table', { table: 'MARA', columns: ['MATNR'] }),
-    /mudou/
-  )
-  assert.equal(f.calls.length, 0)
-  await f.save()
-  turn = await f.begin()
-  f.setApproval(async () => {
-    f.module.closeSapAdt()
-    return true
-  })
-  await assert.rejects(f.execute(turn, 'read_table', { table: 'MARA', columns: ['MATNR'] }))
-  assert.equal(f.calls.length, 0)
-  await assert.rejects(f.execute(turn, 'search_objects', { pattern: '*' }), /expirou/)
+  async function run(session = 'chat-1') {
+    const turn = await f.begin(undefined, session)
+    await f.execute(turn, 'search_objects', { pattern: 'Z*' })
+    await f.execute(turn, 'unit_tests', { objectPath })
+    await f.execute(turn, 'unit_tests', { objectPath })
+    f.module.endSapAdtTurn(turn.id)
+  }
+  await run()
+  await run()
+  assert.equal(approvals, 1)
+  await run('chat-2')
+  assert.equal(approvals, 2)
+  await f.save(config)
+  await run()
+  assert.equal(approvals, 3)
+  await f.module.closeSapAdt()
+  await run()
+  assert.equal(approvals, 4)
 })
+
+test('refused execution consent is not cached and configuration/logout during approval prevent execution', async (t) => {
+  const f = fixture(t)
+  const config = { ...connection, allowQuality: true }
+  await f.save(config)
+  let turn = await f.begin()
+  await f.execute(turn, 'search_objects', { pattern: 'Z*' })
+  f.setApproval(async () => false)
+  await assert.rejects(f.execute(turn, 'unit_tests', { objectPath }), /recusada/)
+  assert.equal(f.calls.filter((c) => c.kind === 'unit').length, 0)
+  f.setApproval(async () => {
+    await f.save({ ...config, client: '200' })
+    return true
+  })
+  await assert.rejects(f.execute(turn, 'unit_tests', { objectPath }), /mudou/)
+  await f.save(config)
+  turn = await f.begin()
+  await f.execute(turn, 'search_objects', { pattern: 'Z*' })
+  f.setApproval(async () => {
+    await f.module.closeSapAdt()
+    return true
+  })
+  await assert.rejects(f.execute(turn, 'unit_tests', { objectPath }))
+  assert.equal(f.calls.filter((c) => c.kind === 'unit').length, 0)
+})
+
 test('cancellation and errors never leak SAP secrets or successful evidence', async (t) => {
   const f = fixture(t)
   await f.save()
@@ -472,7 +507,7 @@ test('source continuation uses the same per-message snapshot and hash without re
   await assert.rejects(f.execute(turn, 'read_source', { objectPath }), /expirou/)
 })
 
-test('empty table restriction permits named reads while preserving validation, approvals and SAP limits', async (t) => {
+test('empty table restriction permits named reads while preserving validation and SAP limits', async (t) => {
   const open = { ...connection, tables: [] }
   const query = policy.sapAdtTableQuery(open, { table: 't001', columns: ['BUKRS'], limit: 200 })
   assert.equal(query.sql, 'SELECT BUKRS FROM T001')
@@ -493,14 +528,10 @@ test('empty table restriction permits named reads while preserving validation, a
   const turn = await f.begin()
   const tool = turn.tools.find((item) => item.name === 'read_table')
   assert.equal(tool.inputSchema.properties.table.enum, undefined)
-  assert.equal(tool.requiresConfirmation, true)
-  f.setApproval(async () => false)
-  await assert.rejects(
-    f.execute(turn, 'read_table', { table: 'T001', columns: ['BUKRS'] }),
-    /recusada/
-  )
-  assert.equal(f.calls.length, 0)
-  f.setApproval(async () => true)
+  assert.equal(tool.requiresConfirmation, false)
+  f.setApproval(async () => {
+    assert.fail('Read requested confirmation')
+  })
   await f.execute(turn, 'read_table', { table: 'T001', columns: ['BUKRS'] })
   assert.equal(f.calls.find((item) => item.kind === 'table').table, 'T001')
 })
@@ -592,4 +623,48 @@ test('source discovery is scoped to a searched object and only its returned path
     }),
     /não pertence/
   )
+})
+
+test('repository object types accept ADT subtypes without admitting query syntax', () => {
+  for (const objectType of ['PROG/I', 'FUGR/I', 'CLAS/OC', 'PROG'])
+    assert.equal(
+      policy.sapAdtSearchSchema.parse({ pattern: 'Z*', objectType }).objectType,
+      objectType
+    )
+  for (const objectType of ['PROG/I/EXTRA', 'PROG?x', 'PROG/I UNION', 'https://evil'])
+    assert.throws(() => policy.sapAdtSearchSchema.parse({ pattern: 'Z*', objectType }))
+})
+
+test('include navigation requires a read parent, resolves through SAP and permits cached source reading', async (t) => {
+  const f = fixture(t)
+  await f.save()
+  const turn = await f.begin()
+  await assert.rejects(
+    f.execute(turn, 'resolve_include', { objectPath, includeName: '/LIME/LPI_COREDEI' }),
+    /Pesquise/
+  )
+  await f.execute(turn, 'search_objects', { pattern: 'Z*' })
+  await assert.rejects(
+    f.execute(turn, 'resolve_include', { objectPath, includeName: '/LIME/LPI_COREDEI' }),
+    /Leia a fonte ativa/
+  )
+  f.setSource('REPORT main.\nINCLUDE /lime/lpi_coredei. \" Document post\n')
+  const parent = await f.execute(turn, 'read_source', { objectPath })
+  assert.equal(parent.result.includes[0].name, '/LIME/LPI_COREDEI')
+  await assert.rejects(
+    f.execute(turn, 'resolve_include', { objectPath, includeName: 'NOT_REFERENCED' }),
+    /não consta/
+  )
+  f.setSource('GET BADI lo_badi.')
+  f.setApproval(async () => {
+    assert.fail('Read asked for confirmation')
+  })
+  const resolved = await f.execute(turn, 'resolve_include', {
+    objectPath,
+    includeName: '/LIME/LPI_COREDEI'
+  })
+  assert.equal(resolved.result.resolvedBy, 'sap_navigation')
+  const include = await f.execute(turn, 'read_source', { objectPath: resolved.result.objectPath })
+  assert.equal(include.result.source, 'GET BADI lo_badi.')
+  assert.equal(f.calls.filter((c) => c.kind === 'definition').length, 1)
 })

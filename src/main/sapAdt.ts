@@ -1,4 +1,9 @@
-import { sapSourceCatalog, selectSapSource, SapAdtSourceError } from './sapAdtSources'
+import {
+  sapSourceCatalog,
+  selectSapSource,
+  sapIncludeReferences,
+  SapAdtSourceError
+} from './sapAdtSources'
 import { app, ipcMain, safeStorage, type BrowserWindow } from 'electron'
 import { randomUUID, createHash } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile, appendFile, stat } from 'node:fs/promises'
@@ -37,11 +42,13 @@ type StoredConnection = SapAdtConnection & { encryptedPassword?: string }
 type Confirmation = (request: {
   callId: string
   kind: 'tool'
+  scope?: 'session'
   serverName: string
   toolName: string
   detail: string
 }) => Promise<boolean>
 interface Turn {
+  sessionId: string
   userId: string
   token: string
   agent: z.infer<typeof agentSchema>
@@ -54,6 +61,13 @@ interface Turn {
   timer: ReturnType<typeof setTimeout>
 }
 const turns = new Map<string, Turn>()
+// Consent belongs to the conversation, account, agent and unchanged connection.
+const sessionApprovals = new Map<string, string>()
+function revokeSessionApprovals(userId: string, connectionId: string): void {
+  const prefix = JSON.stringify([userId, connectionId]) + ':'
+  for (const key of sessionApprovals.keys())
+    if (key.startsWith(prefix)) sessionApprovals.delete(key)
+}
 const activeCalls = new Map<string, AbortController>()
 let sessionEpoch = 0
 let writeQueue: Promise<unknown> = Promise.resolve()
@@ -127,6 +141,7 @@ export async function saveSapAdtConnection(
 ): Promise<SapAdtConnectionView[]> {
   const config = sapAdtConnectionSchema.parse(input)
   return serial(async () => {
+    revokeSessionApprovals(userId, config.id)
     await stopSapAdtDebug(userId + ':' + config.id)
     const rows = await readConnections(userId),
       previous = rows.find((row) => row.id === config.id)
@@ -190,7 +205,7 @@ export function sapAdtTools(
     'Pesquisa objetos ABAP por nome; use * para curingas. Retorna objectPath para leitura.',
     {
       pattern: { type: 'string' },
-      objectType: { type: 'string', description: 'Ex.: CLAS, PROG, FUNC' },
+      objectType: { type: 'string', description: 'Ex.: CLAS, PROG, FUNC, PROG/I ou FUGR/I' },
       limit: { type: 'integer', minimum: 1, maximum: 50 }
     },
     ['pattern']
@@ -198,7 +213,7 @@ export function sapAdtTools(
   if (connection.allowSource)
     add(
       'read_source',
-      'Lê fonte ativa ou inativa em páginas, sem descartar o restante. Quando hasMore=true, continue com offset=nextOffset. Para localizar implementação, use search com texto literal como METHOD nome_do_metodo. Não afirme leitura completa sem cobrir todos os trechos necessários. Nunca edita nem ativa código.',
+      'Lê fonte ativa ou inativa em páginas, sem descartar o restante. Quando hasMore=true, continue com offset=nextOffset. Para localizar implementação, use search com texto literal como METHOD nome_do_metodo. Não afirme leitura completa sem cobrir todos os trechos necessários. Nunca edita nem ativa código. O campo includes lista declarações INCLUDE; use resolve_include para abrir um include referenciado mesmo quando search_objects não o localizar.',
       {
         version: {
           type: 'string',
@@ -238,7 +253,7 @@ export function sapAdtTools(
   if (connection.allowTables)
     add(
       'read_table',
-      `${connection.tables.length ? `Consulta apenas estas tabelas: ${connection.tables.join(', ')}` : 'Consulta qualquer tabela solicitada pelo usuário e autorizada pelo SAP'}. Máximo ${connection.maxRows} registros. Escolha somente as colunas necessárias. Requer aprovação para enviar dados ao provedor de IA.`,
+      `${connection.tables.length ? `Consulta apenas estas tabelas: ${connection.tables.join(', ')}` : 'Consulta qualquer tabela solicitada pelo usuário e autorizada pelo SAP'}. Máximo ${connection.maxRows} registros. Escolha somente as colunas necessárias. Leitura sem confirmação; respeita as permissões configuradas e do SAP.`,
       {
         table: {
           type: 'string',
@@ -258,8 +273,18 @@ export function sapAdtTools(
         },
         limit: { type: 'integer', minimum: 1, maximum: connection.maxRows }
       },
-      ['table', 'columns'],
-      true
+      ['table', 'columns']
+    )
+  if (connection.allowSource)
+    add(
+      'resolve_include',
+      'Resolve pelo SAP um INCLUDE encontrado em fonte ativa já lida nesta mensagem. Use objectPath do objeto pai e includeName retornado em read_source.includes. Permite ler includes que não aparecem na pesquisa de objetos; não adivinhe caminhos.',
+      {
+        objectPath: { type: 'string' },
+        includeName: { type: 'string' },
+        sourcePath: { type: 'string' }
+      },
+      ['objectPath', 'includeName']
     )
   for (const item of advancedToolSchemas(connection))
     tools.push({
@@ -370,6 +395,7 @@ export function endSapAdtTurn(id: string): void {
 }
 export async function closeSapAdt(): Promise<void> {
   sessionEpoch += 1
+  sessionApprovals.clear()
   for (const id of turns.keys()) endSapAdtTurn(id)
   await closeSapAdtDebug()
 }
@@ -408,9 +434,19 @@ export async function executeSapAdtTool(
     if (definition) definition.schema.parse(input)
     const approve = async (detail: string): Promise<void> => {
       signal.throwIfAborted()
+      const action = (input as Record<string, unknown>)?.action
+      if (tool.name === 'debug' && ['wait', 'stack', 'variables'].includes(String(action))) return
+      const key =
+        JSON.stringify([turn.userId, connection.id]) +
+        ':' +
+        JSON.stringify([turn.sessionId, turn.agent.source, turn.agent.id])
+      const signature = JSON.stringify(connection)
+      const reusable = action !== 'acknowledge_cleanup'
+      if (reusable && sessionApprovals.get(key) === signature) return
       const approved = await confirm({
         callId,
         kind: 'tool',
+        scope: reusable ? 'session' : undefined,
         serverName: tool.serverName,
         toolName: tool.name,
         detail:
@@ -420,7 +456,9 @@ export async function executeSapAdtTool(
           connection.client +
           '\nAmbiente: ' +
           connection.environment +
-          '\n\n' +
+          (reusable
+            ? '\n\nAutorizar operações de alteração/execução no SAP durante esta sessão de conversa, nesta conexão e para este agente. Leituras não exigem confirmação.\n\nPrimeira operação:\n'
+            : '\n\n') +
           detail
       })
       if (!approved) throw new SapAdtActionError('Ação SAP recusada pelo usuário.')
@@ -433,6 +471,7 @@ export async function executeSapAdtTool(
       if ((await identity(turn.token)) !== turn.userId)
         throw new SapAdtActionError('A conta mudou durante a aprovação.')
       signal.throwIfAborted()
+      if (reusable) sessionApprovals.set(key, signature)
     }
     const known = (path: string): void => {
       if (!turn.objectPaths.has(connection.id + ':' + path))
@@ -443,18 +482,6 @@ export async function executeSapAdtTool(
     let query: ReturnType<typeof sapAdtTableQuery> | undefined
     if (tool.name === 'read_table') {
       query = sapAdtTableQuery(connection, input)
-      const approved = await confirm({
-        callId,
-        kind: 'tool',
-        serverName: tool.serverName,
-        toolName: tool.name,
-        detail: `Consultar SAP e enviar os registros ao provedor de IA desta conversa?\nAmbiente: ${connection.environment}\nServidor: ${connection.baseUrl}\nMandante: ${connection.client}\nLimite: ${query.limit}\n\n${query.sql}`
-      })
-      if (!approved) throw new Error('Consulta SAP recusada pelo usuário.')
-      const current = findConnection(await readConnections(turn.userId), tool.serverId)
-      if (JSON.stringify(current) !== JSON.stringify(connection))
-        throw new Error('A configuração SAP mudou durante a aprovação. Solicite novamente.')
-      await identity(turn.token)
     }
     const search = tool.name === 'search_objects' ? sapAdtSearchSchema.parse(input) : undefined
     const sourcePath =
@@ -526,6 +553,72 @@ export async function executeSapAdtTool(
               sources: sapSourceCatalog(structure)
             }
           }
+          if (tool.name === 'resolve_include') {
+            const args = z
+              .object({
+                objectPath: z.string().transform(sapAdtPath),
+                includeName: z.string().min(1).max(100),
+                sourcePath: z.string().transform(sapAdtPath).optional()
+              })
+              .strict()
+              .parse(input)
+            known(args.objectPath)
+            const snapshot = turn.sources.get(
+              `${connection.id}:${args.objectPath}:active:${args.sourcePath ?? 'main'}`
+            )
+            if (!snapshot)
+              throw new SapAdtActionError(
+                'Leia a fonte ativa do objeto pai antes de resolver seus includes.'
+              )
+            const reference = sapIncludeReferences(snapshot.source).find(
+              (r) => r.name === args.includeName.toUpperCase()
+            )
+            if (!reference)
+              throw new SapAdtActionError(
+                'O include não consta em uma declaração INCLUDE da fonte lida.'
+              )
+            const target = await client.findDefinition(
+              snapshot.includePath,
+              snapshot.source,
+              reference.line,
+              reference.column,
+              reference.endColumn
+            )
+            const resolved = sapAdtPath(target.url)
+            const includePath = resolved.endsWith('/source/main')
+              ? resolved
+              : selectSapSource(await client.objectStructure(resolved, 'active'))
+            const objectPath = resolved.endsWith('/source/main')
+              ? resolved.slice(0, -'/source/main'.length)
+              : resolved
+            if (objectPath === args.objectPath)
+              throw new SapAdtActionError(
+                'O SAP não retornou um destino diferente para este include.'
+              )
+            const source = await client.getObjectSource(includePath, { version: 'active' })
+            const hash = createHash('sha256').update(source).digest('hex')
+            while (turn.sources.size > 30) turn.sources.delete(turn.sources.keys().next().value!)
+            turn.sources.set(`${connection.id}:${objectPath}:active:main`, {
+              source,
+              includePath,
+              hash
+            })
+            turn.sources.set(`${connection.id}:${objectPath}:active:${includePath}`, {
+              source,
+              includePath,
+              hash
+            })
+            turn.objectPaths.add(`${connection.id}:${objectPath}`)
+            return {
+              includeName: reference.name,
+              parentObjectPath: args.objectPath,
+              objectPath,
+              sourcePath: includePath,
+              sourceHash: hash,
+              resolvedBy: 'sap_navigation',
+              readWith: 'read_source'
+            }
+          }
           if (tool.name === 'read_source') {
             const path = sourcePath!
             const sourceArgs = sapAdtSourceSchema.parse(input)
@@ -550,6 +643,8 @@ export async function executeSapAdtTool(
               sourcePath: snapshot.includePath,
               version: sourceArgs.version,
               sourceHash: snapshot.hash,
+              includes: sapIncludeReferences(snapshot.source).slice(0, 30),
+              includeReferenceCount: sapIncludeReferences(snapshot.source).length,
               ...sapAdtSourcePage(snapshot.source, input)
             }
           }
@@ -647,6 +742,7 @@ export function registerSapAdtIpc(
   )
   handle('remove', async (token: string, id: string) => {
     const userId = await identity(token)
+    revokeSessionApprovals(userId, id)
     await stopSapAdtDebug(userId + ':' + id)
     return serial(async () => {
       const rows = (await readConnections(userId)).filter((row) => row.id !== uuid.parse(id))
@@ -657,6 +753,7 @@ export function registerSapAdtIpc(
   handle('setPassword', async (token: string, id: string, password: string) => {
     const userId = await identity(token)
     await serial(async () => {
+      revokeSessionApprovals(userId, id)
       await stopSapAdtDebug(userId + ':' + id)
       protectedStorage()
       const rows = await readConnections(userId),
@@ -691,7 +788,8 @@ export function registerSapAdtIpc(
       token: string,
       input: unknown,
       expectedUserId: string,
-      connectionId: string
+      connectionId: string,
+      sessionId?: string
     ): Promise<SapAdtTurn> => {
       const epoch = sessionEpoch
       const userId = await identity(token),
@@ -705,8 +803,11 @@ export function registerSapAdtIpc(
         throw new Error('Há muitas mensagens SAP ativas. Aguarde a conclusão ou cancele uma delas.')
       const id = randomUUID(),
         controller = new AbortController()
+      const conversationId =
+        sessionId === undefined ? id : z.string().min(1).max(200).parse(sessionId)
       const timer = setTimeout(() => endSapAdtTurn(id), 600000)
       turns.set(id, {
+        sessionId: conversationId,
         userId,
         token,
         agent,

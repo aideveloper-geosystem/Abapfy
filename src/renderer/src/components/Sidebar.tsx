@@ -20,7 +20,8 @@ import {
   Settings,
   Sparkles,
   SquarePen,
-  Trash2
+  Trash2,
+  Workflow
 } from 'lucide-react'
 import { useAuthStore } from '@renderer/store/authStore'
 import { useChatStore, type ChatSummary, type ProjectSummary } from '@renderer/store/chatStore'
@@ -32,7 +33,7 @@ import { useAuthorNames } from '@renderer/lib/useAuthorNames'
 import { creatorLabel, matchesContent, matchesOwner, contentDate, type OwnerFilter } from '@renderer/lib/contentOwnership'
 import './Sidebar.css'
 
-type ShortcutId = 'new-session' | 'projects' | 'clients' | 'tasks' | 'skills' | 'agents' | 'news'
+type ShortcutId = 'new-session' | 'projects' | 'clients' | 'tasks' | 'skills' | 'agents' | 'news' | 'flows'
 
 const SHORTCUTS: { id: ShortcutId; icon: typeof Sparkles; label: string }[] = [
   { id: 'new-session', icon: SquarePen, label: 'Nova Sessão' },
@@ -41,10 +42,11 @@ const SHORTCUTS: { id: ShortcutId; icon: typeof Sparkles; label: string }[] = [
   { id: 'news', icon: Newspaper, label: 'Notícias' },
   { id: 'tasks', icon: ListChecks, label: 'Tarefas' },
   { id: 'skills', icon: Sparkles, label: 'Skills' },
-  { id: 'agents', icon: Bot, label: 'Agentes' }
+  { id: 'agents', icon: Bot, label: 'Agentes' },
+  { id: 'flows', icon: Workflow, label: 'Fluxos' }
 ]
 
-export type SidebarView = 'chat' | 'skills' | 'agents' | 'projects' | 'clients' | 'tasks' | 'news'
+export type SidebarView = 'chat' | 'skills' | 'agents' | 'projects' | 'clients' | 'tasks' | 'news' | 'flows'
 
 interface SidebarProps {
   activeView: SidebarView
@@ -53,6 +55,7 @@ interface SidebarProps {
   onOpenSettings: () => void
   onOpenSkills: () => void
   onOpenAgents: () => void
+  onOpenFlows: () => void
   onOpenProjects: () => void
   onOpenClients: () => void
   onOpenTasks: () => void
@@ -222,6 +225,7 @@ export function Sidebar({
   onOpenSettings,
   onOpenSkills,
   onOpenAgents,
+  onOpenFlows,
   onOpenProjects,
   onOpenClients,
   onOpenTasks,
@@ -328,6 +332,7 @@ export function Sidebar({
   function handleShortcutClick(id: ShortcutId): void {
     if (id === 'skills') onOpenSkills()
     if (id === 'agents') onOpenAgents()
+    if (id === 'flows') onOpenFlows()
     if (id === 'projects') onOpenProjects()
     if (id === 'clients') onOpenClients()
     if (id === 'tasks') onOpenTasks()

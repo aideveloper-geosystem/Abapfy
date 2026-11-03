@@ -1,0 +1,110 @@
+.activity-compact {
+  margin: 12px 0 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 12px;
+  background: var(--color-surface-2);
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.activity-compact-header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--color-ink-subtle);
+  font: 12px/1.5 var(--font-text);
+}
+.activity-compact-header strong {
+  font-weight: 500;
+  color: var(--color-ink);
+}
+.activity-compact-header > span {
+  margin-left: auto;
+  font-size: 11px;
+}
+.activity-compact-live .activity-compact-header > svg {
+  color: var(--color-primary);
+}
+.activity-compact-current {
+  margin: 9px 0 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--color-ink-subtle);
+  font: 12px/1.6 var(--font-text);
+  animation: activity-enter 180ms ease-out;
+}
+.activity-compact .activity-compact-details {
+  margin: 8px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.activity-compact-details > summary {
+  font-size: 11px;
+  color: var(--color-ink-tertiary);
+  cursor: pointer;
+}
+.activity-compact-details > div {
+  max-height: 420px;
+  overflow: auto;
+  padding-top: 12px;
+}
+.activity-compact .chat-tool-activity {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+}
+.activity-compact .chat-tool-badge {
+  border: 0;
+  border-radius: 7px;
+  padding: 7px 8px;
+  align-items: flex-start;
+  background: var(--color-surface-1);
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.activity-event {
+  min-width: 0;
+  flex: 1;
+}
+.activity-event > summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.activity-event > div {
+  padding: 10px;
+  margin-top: 8px;
+  border-top: 1px solid var(--color-hairline);
+  max-height: 250px;
+  overflow: auto;
+}
+.activity-compact .chat-sap-activity-steps {
+  max-height: 220px;
+  overflow: auto;
+}
+.activity-compact .chat-sap-activity-step {
+  overflow-wrap: anywhere;
+}
+.activity-compact .chat-sap-activity-step > span {
+  min-width: 0;
+}
+@keyframes activity-enter {
+  from {
+    opacity: 0.4;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-compact-current,
+  .activity-compact .chat-tool-badge-spin,
+  .activity-compact .chat-tool-badge-pulse {
+    animation: none;
+  }
+}

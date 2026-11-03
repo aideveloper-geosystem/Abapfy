@@ -31,7 +31,13 @@ Os metadados e permissões são locais por conta e computador. A configuração 
 
 As permissões avançadas começam desligadas, inclusive nas conexões antigas. Escrita e ativação exigem também leitura de fonte. Uma lista de tabelas vazia permite qualquer tabela solicitada e autorizada pelo SAP; uma lista preenchida restringe a nomes exatos.
 
+Leituras não pedem confirmação, independentemente do objeto: pesquisa, fontes, tabelas, metadados, referências, resultados e inspeção de debug. As permissões configuradas e as autorizações do SAP continuam valendo.
+
+A primeira operação de alteração/execução pede autorização para a sessão de conversa, vinculada à conta, ao agente e à conexão selecionada. A autorização vale entre chamadas e mensagens, para os objetos dessa conexão. Fica somente em memória e é descartada ao sair da conta, recarregar/fechar o app ou salvar/remover a conexão ou trocar suas credenciais. Outra conversa, agente ou conexão exige sua própria autorização. Reconhecer uma limpeza manual pendente do debugger continua exigindo confirmação explícita dessa revisão.
+
 ## Leitura de fontes
+
+A pesquisa aceita tipos ADT compostos, como `PROG/I` e `FUGR/I`. `read_source` lista declarações `INCLUDE` encontradas no snapshot; `resolve_include` recebe o objeto pai já pesquisado/lido e o nome exato do include, resolve a referência com a navegação do SAP e armazena o destino lido no snapshot da mensagem. Isso permite abrir includes de grupos de funções não encontrados na pesquisa por nome, sem liberar caminhos arbitrários. Uma falha de resolução continua sendo uma leitura não verificada, não prova de inexistência do objeto. A listagem inicial inclui até 30 referências e informa a contagem total.
 
 `read_source` usa `version: active | inactive`, por padrão `active`. Cada página tem até 12.000 caracteres e limite adicional de tamanho JSON. `nextOffset` permite continuar; `search` localiza texto literal, como `METHOD nome_do_metodo`. O resultado contém `sourceHash`, offsets e linhas. Até quatro fontes ficam em snapshots efêmeros por mensagem. O ciclo tem até 16 rodadas de ferramentas; fontes muito grandes exigem leitura direcionada ou outra mensagem. Não se deve afirmar leitura completa se apenas parte foi consultada.
 
@@ -40,10 +46,10 @@ As permissões avançadas começam desligadas, inclusive nas conexões antigas. 
 1. Pesquisar o objeto e ler a versão apropriada na mesma mensagem.
 2. Consultar `object_transport` para verificar pacote, requests e locks.
 3. Chamar `edit_source` com `expectedHash` retornado pela leitura, trecho original exato, trecho novo e request existente. A alternativa `$TMP` só é aceita quando o próprio SAP confirma objeto local.
-4. A aprovação mostra servidor, mandante, ambiente, hash, trechos anterior/proposto e request. O lock só é obtido depois da aprovação.
+4. A primeira aprovação da sessão mostra servidor, mandante, ambiente, hash, trechos anterior/proposto e request. O lock só é obtido com a autorização da sessão.
 5. Sob lock, a fonte é relida para impedir sobrescrita concorrente. Uma fonte inativa diferente da ativa é preservada: o agente precisa lê-la e editá-la explicitamente.
 6. A gravação é feita como fonte inativa e seu conteúdo é conferido por nova leitura. Não há ativação automática.
-7. Para ativar, ler a fonte inativa, executar sintaxe quando desejado e chamar `activate_object` com o hash dessa versão. Há nova aprovação, lock e verificação da versão ativa.
+7. Para ativar, ler a fonte inativa, executar sintaxe quando desejado e chamar `activate_object` com o hash dessa versão. A autorização da sessão é reutilizada; há lock e verificação da versão ativa.
 
 Falhas após envio de gravação/ativação retornam estado incerto, sem repetir automaticamente. A liberação do lock é tentada no `finally`; falhas de limpeza são informadas. Sessões de escrita usam modo stateful para impedir o retry de gravações por renovação automática de login da biblioteca.
 
@@ -52,10 +58,10 @@ Objetos novos devem usar nome Z/Y ou namespace de cliente. Pacote e request são
 ## Requests e qualidade
 
 - Requests e tarefas são obtidas do SAP. Não inventar números, pacotes ou descrições.
-- Criação, mudança de responsável, adição de usuários e liberação exigem aprovação específica. Liberação não comprova importação em outro sistema; consulte o retorno e o estado atual.
+- Criação, mudança de responsável, adição de usuários e liberação usam a autorização da sessão. Liberação não comprova importação em outro sistema; consulte o retorno e o estado atual.
 - Não há exclusão de requests nem liberação ignorando ATC/locks.
 - Sintaxe pode consultar fonte ativa ou inativa, sem gravar.
-- ABAP Unit executa apenas testes classificados como `harmless`, curtos ou médios. A classificação não garante ausência de efeitos no código do cliente; a execução requer aprovação.
+- ABAP Unit executa apenas testes classificados como `harmless`, curtos ou médios. A classificação não garante ausência de efeitos no código do cliente; a execução usa a autorização da sessão.
 - ATC usa variante existente, limita achados e retorna um `runId`; `atc_results` lê os achados do run retornado naquela mensagem. O resultado não é presumido como aprovado.
 
 ## Debug interativo
@@ -70,7 +76,7 @@ O tool `debug` usa as ações:
 6. `step`: `stepInto`, `stepOver`, `stepReturn` ou `stepContinue`.
 7. `stop`: tenta desanexar, remover seus breakpoints/listener e fazer logoff. Também existe **Encerrar debug desta conexão** nas configurações.
 
-Todas as ações de debug requerem aprovação. A sessão persiste entre mensagens, mas é encerrada em logout, alteração/remoção da conexão, troca de credenciais, recarga/fechamento da janela ou expiração. Ao desanexar, o programa pode continuar executando: a aprovação informa esse comportamento. O Abapfy não altera variáveis, não termina o programa à força e não depura outro usuário. Se a limpeza falhar, o usuário deve conferir o estado no SAP; após a revisão manual, `acknowledge_cleanup` permite reconhecer as pendências com aprovação explícita.
+Inspeção de debug (wait, stack e variables) não pede confirmação; ações que controlam a execução usam a autorização da sessão. A sessão persiste entre mensagens, mas é encerrada em logout, alteração/remoção da conexão, troca de credenciais, recarga/fechamento da janela ou expiração. Ao desanexar, o programa pode continuar executando: a aprovação informa esse comportamento. O Abapfy não altera variáveis, não termina o programa à força e não depura outro usuário. Se a limpeza falhar, o usuário deve conferir o estado no SAP; após a revisão manual, `acknowledge_cleanup` permite reconhecer as pendências com aprovação explícita.
 
 ## Segurança, diagnóstico e limites
 
@@ -92,3 +98,5 @@ Todas as ações de debug requerem aprovação. A sessão persiste entre mensage
 O usuário validou autenticação, pesquisa, leitura e consulta de tabelas em seu SAP. As novas operações de escrita, requests, qualidade e debug precisam de validação operacional em um sistema de desenvolvimento. Testes locais e build não comprovam execução dessas operações no SAP nem homologação visual autenticada.
 
 Avisos de licença da biblioteca e dependências estão em `resources/sap-adt-licenses/`, incluídos no pacote do aplicativo. Referências: https://github.com/marcellourbani/abap-adt-api e https://github.com/marcellourbani/vscode_abap_remote_fs.
+
+Ferramentas locais `workspace_*` usam seus nomes exatos, sem prefixo SAP. Se o modelo acrescentar o prefixo da conexão selecionada a uma ferramenta local registrada, o runtime resolve o nome local. Nomes desconhecidos retornam erro e o catálogo para correção na próxima rodada, sem interromper a análise nem tratar o erro como falha de conexão ADT.

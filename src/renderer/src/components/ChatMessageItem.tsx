@@ -199,9 +199,9 @@ export const ChatMessageItem = memo(function ChatMessageItem({
               onPrompt={onPrompt}
             />
           )}
-          {message.streaming && !message.content && message.thinkingSince === undefined && !message.toolActivity?.some((item) => item.kind === 'compact' && item.status === 'running') && <AiLoadingState />}
+          {message.streaming && !message.content && message.thinkingSince === undefined && !message.toolActivity?.some((item) => item.status === 'running' || item.status === 'confirm') && <AiLoadingState />}
           {sources.length > 0 && !message.streaming && <SourceLinks items={sources} />}
-          {message.streaming && message.thinkingSince === undefined && (
+          {message.streaming && Boolean(message.content) && message.thinkingSince === undefined && (
             <span className="chat-message-cursor" aria-hidden="true" />
           )}
           {!!message.continuing && (

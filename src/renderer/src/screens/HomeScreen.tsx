@@ -47,6 +47,7 @@ import { ClientsScreen } from '@renderer/screens/ClientsScreen'
 import { extractAbapArtifacts, saveAbapArtifacts } from '@renderer/lib/abapDrive'
 import { useTasksStore, type TaskItem, type TaskSubtask } from '@renderer/store/tasksStore'
 import { buildTaskExecutionPrompt } from '@renderer/lib/taskAssistant'
+import { FlowsScreen } from '@renderer/screens/FlowsScreen'
 import { TasksScreen } from '@renderer/screens/TasksScreen'
 import { SessionContextPanel } from '@renderer/components/SessionContextPanel'
 import { AiLoadingState } from '@renderer/components/AiMessageActions'
@@ -76,7 +77,10 @@ import { AI_PROVIDERS } from '@renderer/lib/aiProviders'
 import { claudeGeneration } from '@renderer/lib/claudeModels'
 import { useAiModelsStore } from '@renderer/store/aiModelsStore'
 import { NewsScreen } from '@renderer/screens/NewsScreen'
-import { runMcpToolLoop } from '@renderer/lib/mcpRuntime'
+import { runMcpToolLoop, type RunMcpArgs } from '@renderer/lib/mcpRuntime'
+import { runAdvancedAgentFlow } from '@renderer/lib/advancedFlowRuntime'
+import { useAdvancedFlowStore } from '@renderer/store/advancedFlowStore'
+import { FlowTokenNotice } from '@renderer/components/FlowTokenNotice'
 import { loadSkillContent } from '@renderer/lib/skillContent'
 import { buildKnowledgePrompt, searchProjectKnowledge } from '@renderer/lib/projectKnowledge'
 import {
@@ -134,14 +138,14 @@ interface ActiveAgent {
 
 interface TaskLaunch { id: string; userId: string; taskId: string; subtaskId: string | null; prompt: string }
 
-type View = 'chat' | 'skills' | 'agents' | 'projects' | 'clients' | 'tasks' | 'news'
+type View = 'chat' | 'skills' | 'agents' | 'projects' | 'clients' | 'tasks' | 'news' | 'flows'
 
 export function HomeScreen(): JSX.Element {
   const [taskLaunch, setTaskLaunch] = useState<TaskLaunch | null>(null)
   const consumedTaskLaunch = useRef<string | null>(null)
   const [view, setView] = useState<View>('chat')
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsSection, setSettingsSection] = useState<'mcp' | undefined>()
+  const [settingsSection, setSettingsSection] = useState<'mcp' | 'flows' | undefined>()
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [modelChoiceError, setModelChoiceError] = useState<string | null>(null)
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
@@ -206,6 +210,10 @@ export function HomeScreen(): JSX.Element {
 
   const profile = useAuthStore((state) => state.profile)
   const user = useAuthStore((state) => state.user)
+  const { config: advancedFlowConfig, flows: savedFlows, enabled: flowsEnabled, selectedId: selectedFlowId, select: selectSavedFlow, userId: advancedFlowOwner, load: loadAdvancedFlow } = useAdvancedFlowStore()
+  const [advancedFlowSelected, setAdvancedFlowSelected] = useState(false)
+  useEffect(() => { setAdvancedFlowSelected(false); if (user?.id) loadAdvancedFlow(user.id) }, [user?.id, loadAdvancedFlow])
+  const advancedFlowEnabled = advancedFlowOwner === user?.id && flowsEnabled && advancedFlowConfig.enabled
   const { models: managedModels, blocks: modelBlocks, load: loadModels } = useAiModelsStore()
   useEffect(() => { if (user) void loadModels() }, [user, loadModels])
   const chatScope: WorkScope | null = currentClientId && currentModuleId && (currentChatId || (view === 'chat' && (selectedFolderId || input.trim() || attachments.length > 0)))
@@ -573,6 +581,9 @@ export function HomeScreen(): JSX.Element {
   }
 
   async function handleSend(overrideText?: string, launch?: TaskLaunch): Promise<void> {
+    const advancedConfig = advancedFlowEnabled && advancedFlowSelected ? structuredClone(advancedFlowConfig) : undefined
+    const runProvider = advancedConfig?.orchestrator.provider ?? defaultProvider
+    const runModel = advancedConfig?.orchestrator.model ?? defaultModel
     const sapConnectionId = sapSelection?.userId === user?.id ? sapSelection?.connectionId : undefined
     const sapRequested = Boolean(sapConnectionId)
     const rawText = (overrideText ?? input).trim()
@@ -595,13 +606,13 @@ export function HomeScreen(): JSX.Element {
       else setDraftMessages((prev) => [...prev, errorMessage])
     }
 
-    if (!defaultProvider || !defaultModel || !user) {
+    if (!runProvider || !runModel || !user) {
       pushLocalError(
         'Nenhum modelo padrão configurado. Abra Configurações → Inteligência Artificial.'
       )
       return
     }
-    const { data: modelAllowed, error: modelAccessError } = await supabase.rpc('can_use_ai_model', { p_provider: defaultProvider, p_model_id: defaultModel })
+    const { data: modelAllowed, error: modelAccessError } = await supabase.rpc('can_use_ai_model', { p_provider: runProvider, p_model_id: runModel })
     if (modelAccessError || !modelAllowed) {
       pushLocalError('Este modelo está desativado ou bloqueado para seu usuário. Escolha outro modelo em Configurações → Inteligência Artificial.')
       void loadModels()
@@ -637,7 +648,7 @@ export function HomeScreen(): JSX.Element {
       }
     }
 
-    const apiKey = await fetchApiKey(user.id, defaultProvider)
+    const apiKey = await fetchApiKey(user.id, runProvider)
     if (!apiKey) {
       pushLocalError(`Chave de API do provedor ${selectedProviderDef?.name} não encontrada.`)
       return
@@ -789,8 +800,8 @@ export function HomeScreen(): JSX.Element {
         agentId: agent?.id ?? null,
         agentName: agent?.name ?? null,
         systemPrompt: prompt,
-        provider: defaultProvider,
-        model: defaultModel,
+        provider: runProvider,
+        model: runModel,
         skillIds,
         sapEnvironmentId: null,
         sapEnvironmentLabel: null
@@ -847,9 +858,9 @@ export function HomeScreen(): JSX.Element {
       id: assistantId,
       role: 'assistant',
       content: '',
-      providerLabel: selectedProviderDef?.name,
-      modelLabel: selectedModelDef?.label,
-      effortLabel: defaultProvider === 'claude' ? CLAUDE_EFFORT_LABELS_PT[claudeEffort] : undefined,
+      providerLabel: advancedConfig ? runProvider : selectedProviderDef?.name,
+      modelLabel: advancedConfig ? runModel ?? undefined : selectedModelDef?.label,
+      effortLabel: runProvider === 'claude' ? CLAUDE_EFFORT_LABELS_PT[advancedConfig?.orchestrator.effort ?? claudeEffort] : undefined,
       agentName: agent?.name,
       streaming: true,
       toolActivity: toolActivity.length > 0 ? [...toolActivity] : undefined
@@ -921,7 +932,7 @@ export function HomeScreen(): JSX.Element {
           messages: sourceHistory,
           prompt: runtimePrompt ?? '', settings: { ...status.settings.compaction, automatic: status.settings.compaction.automatic && !compactionAttempted },
           signal: controller.signal, isCurrentUser: () => useAuthStore.getState().user?.id === user!.id,
-          countTokens: defaultProvider === 'claude' ? (messages, prompt) => countClaudeContext({ apiKey: apiKey!, model: defaultModel!, messages, prompt, signal: controller.signal }) : undefined,
+          countTokens: runProvider === 'claude' ? (messages, prompt) => countClaudeContext({ apiKey: apiKey!, model: runModel!, messages, prompt, signal: controller.signal }) : undefined,
           authorizeRouter: () => authorizeCompactionRouter(user!.id),
           onProgress: (label) => {
             compactionAttempted = true
@@ -1012,18 +1023,30 @@ export function HomeScreen(): JSX.Element {
         if (preparedEfTemplate.snapshot) runtimePrompt = `${runtimePrompt ?? ''}\n\n${efTemplatePrompt(preparedEfTemplate.snapshot, preparedEfTemplate.label)}`
         runtimePrompt = `${runtimePrompt ?? ''}\n\n${efEstimatePrompt(efEstimateParameters, selectedClient?.name ?? '')}\n\n## Identificação atual da EF\nCliente: ${JSON.stringify(selectedClient?.name ?? 'A CONFIRMAR')}; módulo selecionado: ${JSON.stringify(modules.find((module) => module.id === currentModuleId)?.name ?? 'A CONFIRMAR')}; consultor autenticado: ${JSON.stringify(profile?.nome ?? 'A CONFIRMAR')}; data de emissão: ${new Date().toLocaleDateString('pt-BR')}. Use esses dados nos campos correspondentes. Não confunda data de emissão com data de solicitação ou aprovação.`
       }
-      if (agent || fileWorkspace) {
+      if (agent || fileWorkspace || advancedConfig) {
         const mcpServers = agent ? configsForAgent(agent.source, agent.id) : []
-        if (mcpServers.length > 0 || fileWorkspace || (sapRequested && user?.id)) {
+        if (mcpServers.length > 0 || fileWorkspace || advancedConfig || (sapRequested && user?.id)) {
           await prepareTurnContext()
           try {
             const progressScope = JSON.stringify([user.id, chatId, currentClientId, currentModuleId, selectedFolderId, sapConnectionId, agent?.source, agent?.id])
             const previousProgress = messages.flatMap(message => message.toolActivity ?? []).map(item => item.workProgress).filter((progress): progress is WorkProgress => progress?.scope === progressScope).at(-1)
             const progressItem: ToolActivityItem = { id: 'workspace-progress', label: 'Progresso da tarefa', kind: 'document', status: 'running' }
             toolActivity.push(progressItem)
-            const mcpEvidence = await runMcpToolLoop({
+            const executeFlow = advancedConfig
+              ? (args: RunMcpArgs) => runAdvancedAgentFlow({ ...args, config: advancedConfig,
+                  resolveModel: async (provider, model) => {
+                    controller.signal.throwIfAborted()
+                    if (useAuthStore.getState().user?.id !== user.id) throw new Error('A conta mudou durante o fluxo.')
+                    const { data: allowed, error } = await supabase.rpc('can_use_ai_model', { p_provider: provider, p_model_id: model })
+                    if (error || !allowed) throw new Error('Modelo indisponível para este usuário: ' + model)
+                    const key = await fetchApiKey(user.id, provider)
+                    if (!key) throw new Error('Configure a chave de API de ' + provider + ' antes de executar o fluxo.')
+                    return key
+                  }
+                }) : runMcpToolLoop
+            const mcpEvidence = await executeFlow({
               workspace: fileWorkspace,
-              claudeEffort: defaultProvider === 'claude' ? claudeEffort : undefined,
+              claudeEffort: runProvider === 'claude' ? claudeEffort : undefined,
               claudeShowThinking: aiPreferences.showThinking,
               claudeWebSearch: aiPreferences.webSearch,
               claudeWebFetch: aiPreferences.webFetch,
@@ -1044,13 +1067,13 @@ export function HomeScreen(): JSX.Element {
               inputBudget: turnInputBudget,
               progress: previousProgress ?? { scope: progressScope, notes: '', steps: [] },
               onProgress: progress => { progressItem.workProgress = progress; progressItem.status = progress.state === 'completed' ? 'done' : ['interrupted','pending'].includes(progress.state ?? '') ? 'error' : 'running'; pushToolActivity() },
-              provider: defaultProvider,
-              model: defaultModel,
+              provider: runProvider,
+              model: runModel,
               apiKey,
               messages: history,
               systemPrompt: runtimePrompt ?? undefined,
               servers: mcpServers,
-              sapAdt: sapConnectionId && user?.id && agent ? { connectionId: sapConnectionId, userId: user.id, token: (await supabase.auth.getSession()).data.session?.access_token ?? '', agent: { source: agent.source, id: agent.id } } : undefined,
+              sapAdt: sapConnectionId && user?.id && agent ? { sessionId: chatId!, connectionId: sapConnectionId, userId: user.id, token: (await supabase.auth.getSession()).data.session?.access_token ?? '', agent: { source: agent.source, id: agent.id } } : undefined,
               signal: controller.signal,
               onToolEvent: (event) => {
                 const label = `${event.serverName} · ${event.toolName}${event.detail ? ` · ${event.detail}` : ''}`
@@ -1060,9 +1083,10 @@ export function HomeScreen(): JSX.Element {
                 pushToolActivity()
               }
             })
+            if (advancedConfig && !finished) throw new Error('O fluxo atingiu um limite sem concluir a resposta. Confira as atividades e as pendências antes de retomar.')
             if (mcpEvidence) runtimePrompt = `${runtimePrompt ?? ''}\n\n---\n\n${mcpEvidence}`
           } catch (mcpError) {
-            if ((mcpError as Error).name === 'AbortError' || mcpError instanceof ProviderRequestError || transientProviderError(mcpError)) throw mcpError
+            if (advancedConfig || (mcpError as Error).name === 'AbortError' || mcpError instanceof ProviderRequestError || transientProviderError(mcpError)) throw mcpError
             runtimePrompt = `${runtimePrompt ?? ''}\n\n---\n\n## Falha nas integrações nesta interação\nNão foi possível consultar as ferramentas configuradas: ${(mcpError as Error).message}. Informe essa limitação ao usuário e não apresente dados das integrações como verificados.`
           }
         }
@@ -1072,8 +1096,8 @@ export function HomeScreen(): JSX.Element {
       while (!finished && iteration < MAX_CONTINUATIONS) {
         if (iteration > 0) {
           const estimated = contextTokens(iterationHistory, runtimePrompt ?? '')
-          const measured = defaultProvider === 'claude' && estimated >= turnInputBudget * .5
-            ? await countClaudeContext({ apiKey, model: defaultModel, messages: iterationHistory, prompt: runtimePrompt ?? '', signal: controller.signal }) : null
+          const measured = runProvider === 'claude' && estimated >= turnInputBudget * .5
+            ? await countClaudeContext({ apiKey, model: runModel, messages: iterationHistory, prompt: runtimePrompt ?? '', signal: controller.signal }) : null
           if ((measured ?? estimated) > turnInputBudget) throw new Error('A continuação excede o orçamento de contexto configurado. A resposta parcial foi preservada; ajuste Features ou continue em outra solicitação.')
         }
         iteration += 1
@@ -1084,13 +1108,13 @@ export function HomeScreen(): JSX.Element {
         let finishInfo: StreamFinishInfo = { reason: 'stop', inputTokens: null, outputTokens: null }
 
         await streamChat({
-          provider: defaultProvider,
-          model: defaultModel,
+          provider: runProvider,
+          model: runModel,
           apiKey,
           messages: iterationHistory,
           systemPrompt: runtimePrompt ?? undefined,
           signal: controller.signal,
-          claudeEffort: defaultProvider === 'claude' ? claudeEffort : undefined,
+          claudeEffort: runProvider === 'claude' ? claudeEffort : undefined,
           claudeShowThinking: aiPreferences.showThinking,
           onRetry: event => {
             closeThinking()
@@ -1340,6 +1364,7 @@ export function HomeScreen(): JSX.Element {
         onOpenSettings={() => { setSettingsSection(undefined); setSettingsOpen(true) }}
         onOpenSkills={() => setView('skills')}
         onOpenAgents={() => setView('agents')}
+        onOpenFlows={() => setView('flows')}
         onOpenProjects={() => setView('projects')}
         onOpenClients={() => setView('clients')}
         onOpenTasks={() => setView('tasks')}
@@ -1356,6 +1381,7 @@ export function HomeScreen(): JSX.Element {
         useTasksStore.setState(state => ({ tasks: state.tasks.map(task => task.projectId === projectId ? { ...task, projectId: null } : task) }))
       }} />}
       {view === 'clients' && <ClientsScreen onNewChat={handleClientNewChat} onOpenChat={(id) => void handleSelectChat(id)} workPresence={presence} presenceError={presenceError} onActivityChange={setDriveActivity} />}
+      {view === 'flows' && <FlowsScreen />}
       {view === 'tasks' && <TasksScreen onStartTask={handleStartTask} onOpenChat={(id) => { void handleSelectChat(id) }} />}
       {view === 'news' && <NewsScreen />}
 
@@ -1601,6 +1627,7 @@ export function HomeScreen(): JSX.Element {
               }}
               onKeyDown={handleKeyDown}
             />
+              {advancedFlowEnabled && advancedFlowSelected && <FlowTokenNotice id="flow-chat-token-warning" compact />}
               <div className="home-composer-toolbar">
               <input
                 ref={fileInputRef}
@@ -1639,6 +1666,7 @@ export function HomeScreen(): JSX.Element {
               <ContextMeter used={contextUsed} settings={compactionSettings} phase={contextState?.phase ?? 'idle'} detail={contextState?.detail ?? ''} error={contextState?.error} covered={contextState?.snapshot?.coveredCount ?? 0} disabled={!currentChatId || isStreaming} onCompact={() => void handleCompact()} />
               <div className="home-composer-spacer" />
 
+              {advancedFlowOwner === user?.id && flowsEnabled && <select className="home-flow-toggle" aria-label="Fluxo da conversa" disabled={isRouting || isStreaming} value={advancedFlowEnabled && advancedFlowSelected ? selectedFlowId ?? '' : ''} onChange={e => { if (e.target.value === '__manage') { setView('flows'); return } if (!e.target.value) { setAdvancedFlowSelected(false); return } selectSavedFlow(user!.id,e.target.value); setAdvancedFlowSelected(true) }}><option value="">Fluxo padrão</option>{savedFlows.filter(f => f.config.enabled).map(f => <option key={f.id} value={f.id}>{f.config.name}</option>)}<option value="__manage">Gerenciar fluxos…</option></select>}
               <SapConnectionSelector userId={user?.id} value={sapSelection} onChange={setSapSelection} onConnectionChange={setSapConnectionView} refreshKey={settingsOpen} disabled={isRouting || isStreaming} onManage={() => { setSettingsSection('mcp'); setSettingsOpen(true) }} />
 
               <div className="home-model-select" ref={modelMenuRef}>
@@ -1646,6 +1674,7 @@ export function HomeScreen(): JSX.Element {
                 <button
                   ref={modelTriggerRef}
                   type="button"
+                  disabled={advancedFlowEnabled && advancedFlowSelected}
                   className={`home-model-trigger ${supportsSelectedEffort && claudeEffort === 'max' ? 'home-model-trigger-max' : ''}`}
                   title={selectedModelDef ? `${selectedModelDef.label}${supportsSelectedEffort ? ` · ${CLAUDE_EFFORT_LABELS_PT[claudeEffort]}` : ''}` : 'Selecionar modelo'}
                   aria-haspopup="dialog"
@@ -1653,7 +1682,7 @@ export function HomeScreen(): JSX.Element {
                   onClick={() => setModelMenuOpen((open) => !open)}
                 >
                   <span>
-                    {selectedModelDef
+                    {advancedFlowEnabled && advancedFlowSelected ? `Orquestrador · ${advancedFlowConfig.orchestrator.model}` : selectedModelDef
                       ? supportsSelectedEffort
                         ? `${selectedModelDef.label} · ${CLAUDE_EFFORT_LABELS_PT[claudeEffort]}`
                         : selectedModelDef.label
@@ -1772,7 +1801,7 @@ export function HomeScreen(): JSX.Element {
         </div>
       )}
 
-      <SettingsModal initialSection={settingsSection} open={settingsOpen} onClose={() => setSettingsOpen(false)} onOpenClients={() => setView('clients')} />
+      <SettingsModal initialSection={settingsSection} open={settingsOpen} onClose={() => setSettingsOpen(false)} onOpenClients={() => setView('clients')} onOpenFlows={() => setView('flows')} />
     </div>
   )
 }

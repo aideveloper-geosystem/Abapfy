@@ -8,8 +8,9 @@ function fixture(provider = 'openai', fail = false, onCall) {
   let enabledTools = true,
     answerWithTool = true
   let diagnostics = []
+  let preliminaryCall = null
   const tool = {
-    qualifiedName: 'sap_test_search_objects',
+    qualifiedName: 'sap_72635102ef7b488eaecfca2d362530c8_search_objects',
     serverId: 'connection',
     serverName: 'Sandbox · mandante 100',
     name: 'search_objects',
@@ -62,8 +63,17 @@ function fixture(provider = 'openai', fail = false, onCall) {
       fetch: async (_url, options) => {
         requests.push(JSON.parse(options.body))
         if (fail) throw new Error('Provider failed')
-        const first = round++ === 0 && answerWithTool
-        const call = { name: tool.qualifiedName, arguments: JSON.stringify({ pattern: 'Z*' }) }
+        const currentRound = round++
+        const first =
+          (currentRound === 0 || (preliminaryCall && currentRound === 1)) && answerWithTool
+        const input =
+          preliminaryCall && currentRound === 0
+            ? { notes: 'Pesquisa em andamento' }
+            : { pattern: 'Z*' }
+        const call = {
+          name: preliminaryCall && currentRound === 0 ? preliminaryCall : tool.qualifiedName,
+          arguments: JSON.stringify(input)
+        }
         return {
           ok: true,
           json: async () =>
@@ -85,10 +95,10 @@ function fixture(provider = 'openai', fail = false, onCall) {
                             type: 'tool_use',
                             id: 'call1',
                             name: call.name,
-                            input: { pattern: 'Z*' }
+                            input
                           }
                         ]
-                      : []
+                      : [{ type: 'text', text: 'done' }]
                   }
                 : {
                     candidates: [
@@ -96,7 +106,7 @@ function fixture(provider = 'openai', fail = false, onCall) {
                         content: {
                           role: 'model',
                           parts: first
-                            ? [{ functionCall: { name: call.name, args: { pattern: 'Z*' } } }]
+                            ? [{ functionCall: { name: call.name, args: input } }]
                             : [{ text: 'done' }]
                         }
                       }
@@ -123,6 +133,9 @@ function fixture(provider = 'openai', fail = false, onCall) {
     setCatalog: (enabled, messages = []) => {
       enabledTools = enabled
       diagnostics = messages
+    },
+    setPreliminaryCall: (name) => {
+      preliminaryCall = name
     },
     skipTool: () => {
       answerWithTool = false
@@ -248,4 +261,117 @@ test('interrupted SAP mutations retain an uncertain receipt and revoke the turn 
   assert.match(progress.at(-1).steps.at(-1).error, /confira a fonte/)
   assert.equal(f.calls.filter((call) => call[0] === 'call').length, 1)
   assert.equal(f.calls.at(-1)[0], 'end')
+})
+
+for (const provider of ['openai', 'claude', 'gemini']) {
+  for (const name of [
+    'sap_72635102ef7b488eaecfca2d362530c8_workspace_checkpoint',
+    'sap_ffffffffffffffffffffffffffffffff_workspace_checkpoint'
+  ]) {
+    test(provider + ' continues SAP reading after checkpoint call: ' + name, async () => {
+      const f = fixture(provider)
+      f.setPreliminaryCall(name)
+      const progress = []
+      const result = await f.module.runMcpToolLoop({
+        ...f.args,
+        sapAdt: {
+          token: 'private-auth-token',
+          userId: 'test-user',
+          connectionId: 'selected-connection',
+          agent: { source: 'default', id: 'abap' },
+          sessionId: 'chat-1'
+        },
+        onProgress: (value) => progress.push(JSON.parse(JSON.stringify(value)))
+      })
+      assert.equal(f.calls.filter((c) => c[0] === 'call').length, 1)
+      assert.equal(f.calls.find((c) => c[0] === 'call')[2], f.tool.qualifiedName)
+      assert.equal(f.requests.length, 3)
+      if (name.includes('72635102'))
+        assert.ok(progress.some((p) => p.notes === 'Pesquisa em andamento'))
+      else assert.match(JSON.stringify(f.requests[1]), /availableTools/)
+      assert.match(result, /ZCL_TEST/)
+    })
+  }
+}
+
+for (const provider of ['openai', 'claude', 'gemini']) {
+  test(
+    provider +
+      ' runs optional final-answer hooks with custom tools without changing the standard loop',
+    async () => {
+      const f = fixture(provider)
+      f.skipTool()
+      let checks = 0,
+        answer = ''
+      await f.module.runMcpToolLoop({
+        ...f.args,
+        extraTools: [
+          {
+            qualifiedName: 'flow_context',
+            name: 'flow_context',
+            serverId: 'flow',
+            serverName: 'Fluxo',
+            description: 'Contexto',
+            requiresConfirmation: false,
+            inputSchema: { type: 'object', properties: {} },
+            execute: async () => ({})
+          }
+        ],
+        beforeAnswer: async () =>
+          ++checks === 1 ? 'Revise a resposta antes de concluir.' : undefined,
+        onAnswer: (text) => {
+          answer = text
+        },
+        maxRounds: 3,
+        maxOutputTokens: 2048
+      })
+      assert.equal(checks, 2)
+      assert.equal(f.requests.length, 2)
+      assert.equal(answer, 'done')
+      if (provider === 'claude') assert.equal(f.requests[0].max_tokens, 2048)
+      if (provider === 'gemini') assert.equal(f.requests[0].generationConfig.maxOutputTokens, 2048)
+      if (provider === 'openai') assert.equal(f.requests[0].max_completion_tokens, 2048)
+    }
+  )
+}
+
+test('a subagent reuses its parent SAP grant and never revokes that grant on completion', async () => {
+  const f = fixture()
+  let grantSeen = null
+  await f.module.runMcpToolLoop({
+    ...f.args,
+    sapAdt: {
+      token: 'token',
+      userId: 'test-user',
+      connectionId: 'selected-connection',
+      agent: { source: 'default', id: 'abap' }
+    },
+    sapTurn: { id: 'shared-grant', tools: [f.tool], diagnostics: [] },
+    onSapTurn: (turn) => {
+      grantSeen = turn.id
+    }
+  })
+  assert.equal(grantSeen, 'shared-grant')
+  assert.equal(f.calls.filter((c) => c[0] === 'begin' || c[0] === 'end').length, 0)
+  assert.equal(f.calls[0][1], 'shared-grant')
+})
+
+test('a syntax hook blocks editing before execution if the quality tool is unavailable', async () => {
+  const f = fixture()
+  f.tool.name = 'edit_source'
+  f.tool.qualifiedName = 'sap_72635102ef7b488eaecfca2d362530c8_edit_source'
+  await assert.rejects(
+    f.module.runMcpToolLoop({
+      ...f.args,
+      sapAdt: {
+        token: 'token',
+        userId: 'test-user',
+        connectionId: 'selected-connection',
+        agent: { source: 'default', id: 'abap' }
+      },
+      checkSyntaxAfterEdit: true
+    }),
+    /Qualidade/
+  )
+  assert.equal(f.calls.filter((c) => c[0] === 'call').length, 0)
 })

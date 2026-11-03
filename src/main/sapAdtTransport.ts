@@ -39,6 +39,7 @@ export function sapAdtTransport(
       const allowed =
         method === 'GET' ||
         (method === 'POST' && p === '/sap/bc/adt/datapreview/ddic') ||
+        (connection.allowSource && method === 'POST' && p === '/sap/bc/adt/navigation/target') ||
         (quality &&
           method === 'POST' &&
           (p === '/sap/bc/adt/checkruns' ||

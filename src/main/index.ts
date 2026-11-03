@@ -144,6 +144,7 @@ function surfaceMainWindow(): void {
 interface McpConfirmationRequest {
   callId: string
   kind: 'server' | 'tool'
+  scope?: 'session'
   serverName: string
   toolName?: string
   detail: string

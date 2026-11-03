@@ -133,7 +133,7 @@ export const SAP_ADT_ADVANCED: Definition[] = [
   def(
     'release_transport',
     'allowTransportRelease',
-    'Libera request/tarefa após aprovação específica. Nunca ignora locks ou ATC.',
+    'Libera request/tarefa com autorização da sessão. Nunca ignora locks ou ATC.',
     { request }
   ),
   def('set_transport_owner', 'allowTransports', 'Altera responsável da request/tarefa aprovada.', {
@@ -179,7 +179,7 @@ export const SAP_ADT_ADVANCED: Definition[] = [
   def(
     'debug',
     'allowDebug',
-    'Debugger interativo do próprio usuário. action start cria sessão; breakpoints define até 20 linhas; wait espera até 25s e anexa a parada; stack/variables leem; step avança; stop desanexa e remove os breakpoints desta sessão; acknowledge_cleanup confirma revisão manual de pendências após falha de limpeza. Requer aprovação. Sessão dura até 10 minutos, persiste entre mensagens e é encerrada no logout/revogação. Não inicia uma transação por conta própria.',
+    'Debugger interativo do próprio usuário. action start cria sessão; breakpoints define até 20 linhas; wait espera até 25s e anexa a parada; stack/variables leem; step avança; stop desanexa e remove os breakpoints desta sessão; acknowledge_cleanup confirma revisão manual de pendências após falha de limpeza. Inspeção não pede confirmação; controle de execução usa autorização da sessão. Sessão dura até 10 minutos, persiste entre mensagens e é encerrada no logout/revogação. Não inicia uma transação por conta própria.',
     {
       action: z.enum([
         'start',

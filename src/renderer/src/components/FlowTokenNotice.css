@@ -1,0 +1,4 @@
+.flow-token-notice { display:flex; align-items:flex-start; gap:9px; margin:0; padding:12px 14px; border:1px solid color-mix(in srgb,var(--color-semantic-warning) 28%,var(--color-hairline)); border-radius:10px; background:color-mix(in srgb,var(--color-semantic-warning) 7%,transparent); color:var(--color-ink-subtle); font:12px/1.6 var(--font-text); }
+.flow-token-notice > svg { flex:none; margin-top:2px; color:var(--color-semantic-warning); }
+.flow-token-notice strong { font-weight:600; color:var(--color-ink); }
+.flow-token-notice-compact { margin:4px 14px 8px; padding:8px 10px; font-size:11px; }

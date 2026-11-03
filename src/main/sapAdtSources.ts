@@ -3,6 +3,17 @@ import { sapAdtPath } from '../shared/sapAdt'
 
 export class SapAdtSourceError extends Error {}
 
+export function sapIncludeReferences(source: string) {
+  return source.split(/\r?\n/).flatMap((text, index) => {
+    const match = /^\s*INCLUDE\s+((?:\/[A-Z0-9_]+\/)?[A-Z0-9_]+)\s*\./i.exec(text)
+    if (!match) return []
+    const column = text.toUpperCase().indexOf(match[1].toUpperCase())
+    return [
+      { name: match[1].toUpperCase(), line: index + 1, column, endColumn: column + match[1].length }
+    ]
+  })
+}
+
 /** Only sources returned by the SAP structure may be selected under an object lock. */
 export function sapSourceCatalog(structure: AbapObjectStructure) {
   const main = sapAdtPath(ADTClient.mainInclude(structure))

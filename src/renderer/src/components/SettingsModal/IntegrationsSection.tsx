@@ -357,7 +357,7 @@ function SapAdtSection(): JSX.Element {
                 checked={draft.allowTables}
                 onChange={(e) => update({ allowTables: e.target.checked })}
               />{' '}
-              Permitir consulta de tabelas com aprovação a cada chamada
+              Permitir consulta de tabelas sem confirmação
             </label>
             {draft.allowTables && (
               <div className="sap-adt-grid">
@@ -412,7 +412,7 @@ function SapAdtSection(): JSX.Element {
               ))}
               <p className="settings-muted">
                 As novas permissões começam desativadas. Escrita e ativação exigem leitura da versão
-                correspondente e aprovação específica. Debug pode pausar e continuar programas; ao
+                correspondente e autorização por sessão de conversa. Leituras não pedem confirmação. Debug pode pausar e continuar programas; ao
                 parar ou expirar, tenta desanexar e limpar seus breakpoints. A classificação de
                 ambiente é informada pelo administrador.
               </p>

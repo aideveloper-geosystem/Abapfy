@@ -56,7 +56,7 @@ export function McpConfirmationBanner(): JSX.Element | null {
                 className="mcp-confirm-btn-approve"
                 onClick={() => respond(request.callId, true)}
               >
-                {request.kind === 'server' ? 'Iniciar servidor' : 'Autorizar uma vez'}
+                {request.kind === 'server' ? 'Iniciar servidor' : request.scope === 'session' ? 'Autorizar nesta sessão' : 'Autorizar uma vez'}
               </button>
             </div>
           </div>

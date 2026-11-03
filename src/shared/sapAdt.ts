@@ -119,7 +119,8 @@ export interface SapAdtApi {
     token: string,
     agent: { source: 'default' | 'custom'; id: string },
     expectedUserId: string,
-    connectionId: string
+    connectionId: string,
+    sessionId?: string
   ) => Promise<SapAdtTurn>
   callTool: (
     turnId: string,
@@ -136,7 +137,7 @@ export const sapAdtSearchSchema = z
     pattern: z.string().trim().min(1).max(100),
     objectType: z
       .string()
-      .regex(/^[A-Z][A-Z0-9]{0,9}$/)
+      .regex(/^[A-Z][A-Z0-9]{0,9}(?:\/[A-Z0-9]{1,10})?$/)
       .optional(),
     limit: z.number().int().min(1).max(50).default(20)
   })
@@ -273,6 +274,6 @@ export function sapAdtAccessDiagnostics(
       )
     )
       return `${connection.name}: conexão habilitada, mas este agente não está autorizado. Selecione o agente em Configurações > Integrações > SAP · ADT e salve.`
-    return `${connection.name}: pesquisa de objetos disponível; leitura de fonte ${connection.allowSource ? 'habilitada' : 'desativada'}; consulta de tabelas ${connection.allowTables ? 'habilitada, com aprovação' : 'desativada. Ative Permitir consulta de tabelas nas permissões da conexão e salve'}; edição ${connection.allowWrite ? 'habilitada, com revisão' : 'desativada (habilite Editar fonte ABAP em Configurações > Integrações > SAP · ADT)'}; validação de sintaxe/qualidade ${connection.allowQuality ? 'habilitada' : 'desativada'}; transportes ${connection.allowTransports ? 'habilitados' : 'desativados (informe request existente ou habilite o gerenciamento)'}; ativação ${connection.allowActivate ? 'habilitada, com aprovação específica' : 'desativada'}.`
+    return `${connection.name}: pesquisa de objetos disponível; leitura de fonte ${connection.allowSource ? 'habilitada' : 'desativada'}; consulta de tabelas ${connection.allowTables ? 'habilitada, sem confirmação' : 'desativada. Ative Permitir consulta de tabelas nas permissões da conexão e salve'}; edição ${connection.allowWrite ? 'habilitada, com autorização por sessão' : 'desativada (habilite Editar fonte ABAP em Configurações > Integrações > SAP · ADT)'}; validação de sintaxe/qualidade ${connection.allowQuality ? 'habilitada' : 'desativada'}; transportes ${connection.allowTransports ? 'habilitados' : 'desativados (informe request existente ou habilite o gerenciamento)'}; ativação ${connection.allowActivate ? 'habilitada, com autorização por sessão' : 'desativada'}.`
   })
 }

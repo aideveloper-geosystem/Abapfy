@@ -222,7 +222,8 @@ test('progress UI renders actual object results, failures and continuation witho
   const { ToolActivityBadges } = loadTs('src/renderer/src/components/ToolActivityBadges.tsx', {
     './AiPresentation': { AiPresentation: () => null },
     './RichText': { RichText: ({ content }) => createElement('p', null, content) },
-    './AiInterface.css': {}
+    './AiInterface.css': {},
+    './ToolActivityBadges.css': {}
   })
   const html = renderToStaticMarkup(
     createElement(ToolActivityBadges, {
@@ -407,7 +408,8 @@ test('provider error marks the whole activity interrupted even if all individual
   const { ToolActivityBadges } = loadTs('src/renderer/src/components/ToolActivityBadges.tsx', {
     './AiPresentation': { AiPresentation: () => null },
     './RichText': { RichText: () => null },
-    './AiInterface.css': {}
+    './AiInterface.css': {},
+    './ToolActivityBadges.css': {}
   })
   const html = renderToStaticMarkup(
     createElement(ToolActivityBadges, {

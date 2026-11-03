@@ -76,7 +76,7 @@ export interface McpToolEvent {
   detail?: string
 }
 
-interface RunMcpArgs {
+export interface RunMcpArgs {
   provider: AiProviderId
   model: string
   apiKey: string
@@ -84,10 +84,26 @@ interface RunMcpArgs {
   systemPrompt?: string
   servers: McpServerItem[]
   workspace?: FileWorkspace
+  extraTools?: WorkspaceTool[]
+  toolFilter?: (tool: {
+    name: string
+    qualifiedName: string
+    requiresConfirmation: boolean
+    isSapAdt?: boolean
+  }) => boolean
+  maxRounds?: number
+  maxOutputTokens?: number
+  onToolResult?: (execution: ToolExecution) => void
+  beforeAnswer?: (text: string) => Promise<string | undefined>
+  checkSyntaxAfterEdit?: boolean
+  sapTurn?: Awaited<ReturnType<typeof window.api.sapAdt.beginTurn>>
+  onSapTurn?: (turn: Awaited<ReturnType<typeof window.api.sapAdt.beginTurn>>) => void
+  prepareContext?: () => Promise<string | undefined>
   progress?: WorkProgress
   onProgress?: (progress: WorkProgress) => void
   inputBudget?: number
   sapAdt?: {
+    sessionId?: string
     token: string
     userId: string
     connectionId: string
@@ -112,7 +128,7 @@ interface RunMcpArgs {
   currentProgress?: () => WorkProgress
 }
 
-interface ToolExecution {
+export interface ToolExecution {
   tool: McpToolInfo
   args: Record<string, unknown>
   result: unknown
@@ -166,8 +182,40 @@ async function executeTool(
   onToolEvent?: (event: McpToolEvent) => void
 ): Promise<ToolExecution> {
   signal.throwIfAborted()
-  const tool = tools.find((item) => item.qualifiedName === qualifiedName)
-  if (!tool) throw new Error(`Ferramenta MCP desconhecida: ${qualifiedName}`)
+  // Resolve accidental SAP prefixes only for registered local workspace tools.
+  const localName = qualifiedName.replace(/^sap_[a-f0-9]{32}_/, '')
+  const knownPrefix = tools.some(
+    (item) =>
+      item.isSapAdt &&
+      qualifiedName.startsWith(
+        item.qualifiedName.slice(0, item.qualifiedName.length - item.name.length)
+      )
+  )
+  const tool =
+    tools.find((item) => item.qualifiedName === qualifiedName) ??
+    (knownPrefix && localName.startsWith('workspace_')
+      ? tools.find((item) => item.qualifiedName === localName && item.execute && !item.isSapAdt)
+      : undefined)
+  if (!tool)
+    return {
+      tool: {
+        qualifiedName,
+        name: qualifiedName,
+        serverId: '',
+        serverName: 'Ferramentas',
+        description: '',
+        inputSchema: {},
+        requiresConfirmation: false
+      },
+      args,
+      result: {
+        isError: true,
+        error: `Ferramenta MCP desconhecida: ${qualifiedName}`,
+        availableTools: tools.map((item) => item.qualifiedName),
+        message:
+          'Nenhuma operação foi executada por esta chamada. Corrija o nome usando o catálogo e continue a tarefa. Isso não indica falha de conexão ADT nem ausência de objetos SAP.'
+      }
+    }
   if (tool.isResourceReader && !tool.resourceUris?.includes(String(args.uri ?? ''))) {
     throw new Error('Recurso MCP não consta no catálogo consultado.')
   }
@@ -279,6 +327,62 @@ async function executeTool(
 // Expõe recursos MCP (protocolo `resources/*`, separado de `tools/*`) como
 // mais uma ferramenta de leitura pro modelo escolher — sem isso, servidores
 // que só publicam recursos (não tools) ficavam invisíveis pro harness.
+async function dispatchTool(
+  args: RunMcpArgs,
+  tools: McpToolInfo[],
+  configs: McpServerConfig[],
+  name: string,
+  input: Record<string, unknown>,
+  signal: AbortSignal,
+  onToolEvent?: (event: McpToolEvent) => void
+): Promise<ToolExecution> {
+  const target = tools.find((t) => t.qualifiedName === name)
+  if (
+    args.checkSyntaxAfterEdit &&
+    target?.isSapAdt &&
+    target.name === 'edit_source' &&
+    !tools.some((t) => t.isSapAdt && t.serverId === target.serverId && t.name === 'syntax_check')
+  )
+    throw new Error('Hook de sintaxe: habilite Qualidade na conexão ADT antes de editar.')
+  const execution = await executeTool(tools, configs, name, input, signal, onToolEvent)
+  args.onToolResult?.(execution)
+  const value = execution.result as {
+    isError?: boolean
+    result?: { status?: string; validation?: { status?: string } }
+  }
+  if (
+    args.checkSyntaxAfterEdit &&
+    execution.tool.isSapAdt &&
+    execution.tool.name === 'edit_source' &&
+    !value?.isError &&
+    value?.result?.status === 'saved_inactive' &&
+    !['syntax_valid', 'syntax_errors', 'check_failed'].includes(
+      value.result.validation?.status ?? ''
+    )
+  ) {
+    const syntax = tools.find(
+      (t) => t.isSapAdt && t.serverId === execution.tool.serverId && t.name === 'syntax_check'
+    )
+    if (!syntax)
+      throw new Error('Hook de sintaxe: habilite Qualidade na conexão ADT antes de editar.')
+    const check = await executeTool(
+      tools,
+      configs,
+      syntax.qualifiedName,
+      {
+        objectPath: input.objectPath,
+        ...(input.sourcePath ? { sourcePath: input.sourcePath } : {}),
+        version: 'inactive'
+      },
+      signal,
+      onToolEvent
+    )
+    args.onToolResult?.(check)
+    execution.result = { ...value, postEditSyntax: check.result }
+  }
+  return execution
+}
+
 async function buildResourceTools(configs: McpServerConfig[]): Promise<McpToolInfo[]> {
   const resources = await window.api.mcp.listResources(configs).catch(() => [] as McpResourceInfo[])
   if (resources.length === 0) return []
@@ -459,7 +563,8 @@ async function runOpenAi(
     fragments: string[] = []
   for (
     let round = 0;
-    round < (args.sapAdt || args.workspace ? MAX_SAP_TOOL_ROUNDS : MAX_TOOL_ROUNDS);
+    round <
+    (args.maxRounds ?? (args.sapAdt || args.workspace ? MAX_SAP_TOOL_ROUNDS : MAX_TOOL_ROUNDS));
     round += 1
   ) {
     if (
@@ -478,6 +583,7 @@ async function runOpenAi(
           body: JSON.stringify({
             model: args.model,
             stream: false,
+            ...(args.maxOutputTokens ? { max_completion_tokens: args.maxOutputTokens } : {}),
             messages,
             tools: tools.map((tool) => ({
               type: 'function',
@@ -513,6 +619,12 @@ async function runOpenAi(
       continue
     }
     if (calls.length === 0) {
+      const correction = await args.beforeAnswer?.(fragments.join('') + (message.content ?? ''))
+      if (correction) {
+        messages.push({ role: 'assistant', content: message.content ?? '' })
+        messages.push({ role: 'user', content: correction })
+        continue
+      }
       if (typeof message?.content === 'string')
         executions.push(summaryReceipt(fragments.join('') + message.content))
       return executions
@@ -537,7 +649,8 @@ async function runOpenAi(
     }
     messages.push(message)
     for (const { call, name, args: callArgs } of parsed) {
-      const execution = await executeTool(
+      const execution = await dispatchTool(
+        args,
         tools,
         configs,
         name,
@@ -569,7 +682,8 @@ async function runClaude(
   let webAvailable = true
   for (
     let round = 0;
-    round < (args.sapAdt || args.workspace ? MAX_SAP_TOOL_ROUNDS : MAX_TOOL_ROUNDS);
+    round <
+    (args.maxRounds ?? (args.sapAdt || args.workspace ? MAX_SAP_TOOL_ROUNDS : MAX_TOOL_ROUNDS));
     round++
   ) {
     if (
@@ -579,7 +693,12 @@ async function runClaude(
       executions.push(limitReceipt())
       return executions
     }
-    const modelParams = claudeToolLoopParams(args.model, 4096, args.claudeEffort)
+    const modelParams = claudeToolLoopParams(
+      args.model,
+      args.maxOutputTokens ?? 4096,
+      args.claudeEffort
+    )
+    if (args.maxOutputTokens) modelParams.max_tokens = args.maxOutputTokens
     if (args.claudeShowThinking && modelParams.thinking)
       modelParams.thinking = { ...(modelParams.thinking as object), display: 'summarized' }
     let webTools = webAvailable
@@ -673,6 +792,12 @@ async function runClaude(
     }
     if (!calls.length) {
       if (text) {
+        const correction = await args.beforeAnswer?.(text)
+        if (correction) {
+          messages.push({ role: 'assistant', content: data.content })
+          messages.push({ role: 'user', content: correction })
+          continue
+        }
         executions.push(summaryReceipt(fragments.join('') + text))
         return executions
       }
@@ -697,7 +822,8 @@ async function runClaude(
     messages.push({ role: 'assistant', content: data.content })
     const results: Record<string, unknown>[] = []
     for (const call of calls) {
-      const execution = await executeTool(
+      const execution = await dispatchTool(
+        args,
         tools,
         configs,
         call.name,
@@ -730,7 +856,8 @@ async function runGemini(
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${args.model}:generateContent?key=${args.apiKey}`
   for (
     let round = 0;
-    round < (args.sapAdt || args.workspace ? MAX_SAP_TOOL_ROUNDS : MAX_TOOL_ROUNDS);
+    round <
+    (args.maxRounds ?? (args.sapAdt || args.workspace ? MAX_SAP_TOOL_ROUNDS : MAX_TOOL_ROUNDS));
     round += 1
   ) {
     if (
@@ -750,6 +877,9 @@ async function runGemini(
             contents,
             ...(args.systemPrompt
               ? { systemInstruction: { parts: [{ text: args.systemPrompt }] } }
+              : {}),
+            ...(args.maxOutputTokens
+              ? { generationConfig: { maxOutputTokens: args.maxOutputTokens } }
               : {}),
             tools: [
               {
@@ -801,6 +931,12 @@ async function runGemini(
         .filter((part: { thought?: boolean }) => !part.thought)
         .map((part: { text?: string }) => part.text ?? '')
         .join('\n')
+      const correction = await args.beforeAnswer?.(fragments.join('') + text)
+      if (correction) {
+        contents.push(content)
+        contents.push({ role: 'user', parts: [{ text: correction }] })
+        continue
+      }
       if (text) executions.push(summaryReceipt(fragments.join('') + text))
       return executions
     }
@@ -808,7 +944,8 @@ async function runGemini(
     const responseParts: Record<string, unknown>[] = []
     for (const part of calls) {
       const call = part.functionCall as { name: string; args?: Record<string, unknown> }
-      const execution = await executeTool(
+      const execution = await dispatchTool(
+        args,
         tools,
         configs,
         call.name,
@@ -831,7 +968,8 @@ async function runGemini(
 }
 
 export async function runMcpToolLoop(args: RunMcpArgs): Promise<string | null> {
-  if (args.servers.length === 0 && !args.sapAdt && !args.workspace) return null
+  if (args.servers.length === 0 && !args.sapAdt && !args.workspace && !args.extraTools?.length)
+    return null
   args.signal.throwIfAborted()
   const progress: WorkProgress = {
     scope: args.progress?.scope ?? '',
@@ -886,21 +1024,23 @@ export async function runMcpToolLoop(args: RunMcpArgs): Promise<string | null> {
     return id
   }
   const configs = args.servers.map(asConfig)
-  let sapTurn: Awaited<ReturnType<typeof window.api.sapAdt.beginTurn>> | null = null
+  let sapTurn: Awaited<ReturnType<typeof window.api.sapAdt.beginTurn>> | null = args.sapTurn ?? null
   try {
     const failures: string[] = []
-    if (args.sapAdt) {
+    if (args.sapAdt && !sapTurn) {
       try {
         sapTurn = await window.api.sapAdt.beginTurn(
           args.sapAdt.token,
           args.sapAdt.agent,
           args.sapAdt.userId,
-          args.sapAdt.connectionId
+          args.sapAdt.connectionId,
+          args.sapAdt.sessionId
         )
       } catch (error) {
         failures.push(`SAP ADT: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
+    if (sapTurn) args.onSapTurn?.(sapTurn)
     args.signal.throwIfAborted()
     const [listings, resourceTools] = await Promise.all([
       Promise.allSettled(configs.map((config) => window.api.mcp.listTools([config]))),
@@ -923,11 +1063,13 @@ export async function runMcpToolLoop(args: RunMcpArgs): Promise<string | null> {
     )
     let tools: McpToolInfo[] = [
       ...(args.workspace?.tools ?? []),
+      ...(args.extraTools ?? []),
       ...[...serverTools, ...resourceTools].filter(
         (tool) => !disabled.get(tool.serverId)?.has(tool.name)
       ),
       ...(sapTurn?.tools.map((tool) => ({ ...tool, sapAdtTurnId: sapTurn!.id })) ?? [])
     ]
+    tools = tools.filter((tool) => !args.toolFilter || args.toolFilter(tool))
     tools = tools.map((tool) => {
       const original = tool.execute
       return {
@@ -1005,6 +1147,7 @@ export async function runMcpToolLoop(args: RunMcpArgs): Promise<string | null> {
       })
     // Wrap SAP results in the renderer to persist receipts, never grants or credentials.
     const sapTools = tools.filter((tool) => tool.isSapAdt)
+    const sapScopeRestricted = Boolean(args.toolFilter && sapTurn?.tools.length && !sapTools.length)
     const sapAvailability = args.sapAdt
       ? [
           '## Disponibilidade SAP ADT nesta mensagem',
@@ -1014,7 +1157,11 @@ export async function runMcpToolLoop(args: RunMcpArgs): Promise<string | null> {
                 'Ferramentas disponibilizadas (a listagem não comprova consulta ao SAP):',
                 ...sapTools.map((tool) => `- ${tool.serverName}: ${tool.name}`)
               ]
-            : ['Nenhuma ferramenta ADT autorizada para este agente.']),
+            : [
+                sapScopeRestricted
+                  ? 'ADT fora do escopo deste participante; outros participantes podem consultar conforme suas permissões.'
+                  : 'Nenhuma ferramenta ADT autorizada para este agente.'
+              ]),
           'Somente a conexão selecionada no chat está autorizada nesta mensagem. Não tente acessar outro ambiente. Para consultar tabelas use read_table se disponível; não substitua a consulta solicitada pela geração de um programa ABAP. Não alegue falta de conexão ou ferramenta além do que este diagnóstico comprova.'
         ].join('\n')
       : ''
@@ -1024,9 +1171,11 @@ export async function runMcpToolLoop(args: RunMcpArgs): Promise<string | null> {
         serverName: 'SAP ADT',
         toolName: sapTools.length
           ? `Ferramentas disponíveis: ${[...new Set(sapTools.map((tool) => tool.name))].join(', ')}`
-          : (sapTurn?.diagnostics?.join(' ') ?? failures.join(' ')) ||
-            'Nenhuma conexão autorizada para este agente',
-        status: sapTools.length ? 'done' : 'error'
+          : sapScopeRestricted
+            ? 'ADT fora do escopo deste participante'
+            : (sapTurn?.diagnostics?.join(' ') ?? failures.join(' ')) ||
+              'Nenhuma conexão autorizada para este agente',
+        status: sapTools.length || sapScopeRestricted ? 'done' : 'error'
       })
     if (tools.length === 0) {
       sessionState('pending', 'Ferramentas indisponíveis · é necessário revisar as permissões')
@@ -1034,14 +1183,19 @@ export async function runMcpToolLoop(args: RunMcpArgs): Promise<string | null> {
       if (args.sapAdt) return sapAvailability
       return null
     }
+    const preparedContext = await args.prepareContext?.()
+    args.signal.throwIfAborted()
     const toolArgs = {
       ...args,
+      messages: preparedContext
+        ? [...args.messages, { role: 'user' as const, content: preparedContext }]
+        : args.messages,
       systemPrompt: [
         args.systemPrompt,
         sapAvailability,
         progressPrompt(args.progress),
         args.workspace || args.sapAdt
-          ? 'Trabalhe em etapas: localizar, ler, propor alterações, conferir gravação e validar. Use workspace_checkpoint para registrar conclusões e pendências. Para ADT, explore list_sources; edite com hashes atuais e transporte confirmado. Após salvar inativo, execute syntax_check se autorizado; corrija os erros antes de propor ativação. Não apresente edição como ativação. Se faltarem permissões, informe exatamente quais e onde habilitar.'
+          ? 'Trabalhe em etapas: localizar, ler, propor alterações, conferir gravação e validar. Use workspace_checkpoint para registrar conclusões e pendências. Ferramentas workspace_* são locais: use o nome exato, sem prefixo sap_ ou da conexão. Leituras ADT não exigem confirmação; alterações/execução usam autorização válida nesta sessão de conversa. Para ADT, explore list_sources; edite com hashes atuais e transporte confirmado. Após salvar inativo, execute syntax_check se autorizado; corrija os erros antes de propor ativação. Não apresente edição como ativação. Se faltarem permissões, informe exatamente quais e onde habilitar.'
           : ''
       ]
         .filter(Boolean)
@@ -1053,7 +1207,13 @@ export async function runMcpToolLoop(args: RunMcpArgs): Promise<string | null> {
         : args.provider === 'claude'
           ? await runClaude(toolArgs, configs, tools)
           : await runGemini(toolArgs, configs, tools)
-    if (executions.length === 0 && failures.length === 0 && !args.sapAdt && !args.workspace)
+    if (
+      executions.length === 0 &&
+      failures.length === 0 &&
+      !args.sapAdt &&
+      !args.workspace &&
+      !args.extraTools?.length
+    )
       return null
     const summary = [...executions].reverse().find((execution) => execution.tool.name === 'summary')
     const summaryNotes = (summary?.result as { notes?: string } | undefined)?.notes
@@ -1107,6 +1267,6 @@ export async function runMcpToolLoop(args: RunMcpArgs): Promise<string | null> {
     )
     throw error
   } finally {
-    if (sapTurn) await window.api.sapAdt.endTurn(sapTurn.id).catch(() => undefined)
+    if (sapTurn && !args.sapTurn) await window.api.sapAdt.endTurn(sapTurn.id).catch(() => undefined)
   }
 }

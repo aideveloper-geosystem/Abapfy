@@ -78,6 +78,7 @@ const updates = {
 interface McpConfirmationPending {
   callId: string
   kind: 'server' | 'tool'
+  scope?: 'session'
   serverName: string
   toolName?: string
   detail: string
@@ -152,7 +153,7 @@ const sapAdt: import('../shared/sapAdt').SapAdtApi = {
   remove: (token, id) => ipcRenderer.invoke('sapAdt:remove', token, id),
   setPassword: (token, id, password) => ipcRenderer.invoke('sapAdt:setPassword', token, id, password),
   test: (token, id) => ipcRenderer.invoke('sapAdt:test', token, id),
-  beginTurn: (token, agent, expectedUserId, connectionId) => ipcRenderer.invoke('sapAdt:beginTurn', token, agent, expectedUserId, connectionId),
+  beginTurn: (token, agent, expectedUserId, connectionId, sessionId) => ipcRenderer.invoke('sapAdt:beginTurn', token, agent, expectedUserId, connectionId, sessionId),
   callTool: (id, name, args, callId) => ipcRenderer.invoke('sapAdt:callTool', id, name, args, callId),
   endTurn: (id) => ipcRenderer.invoke('sapAdt:endTurn', id),
   closeAll: () => ipcRenderer.invoke('sapAdt:closeAll')
