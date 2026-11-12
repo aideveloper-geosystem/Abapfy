@@ -46,16 +46,23 @@ do $$ declare t text; begin
   foreach t in array array['clients','client_modules','projects','chats','chat_messages','project_documents','project_document_chunks',
                            'client_files','client_folders','client_file_events','client_work_presence'] loop
     execute format('alter table public.%I enable row level security', t);
-    -- Real pre-041 policies: clients/modules were writable only by platform admins, trash deletes only by admins.
     execute format('create policy %I on public.%I for select to authenticated using (true)', t || '_open_read', t);
-    if t not in ('clients', 'client_modules', 'client_files') then
+    -- chats and friends stay fully open, as in the real schema.
+    if t in ('chats','chat_messages','project_documents','project_document_chunks','client_file_events','client_work_presence') then
       execute format('create policy %I on public.%I for all to authenticated using (true) with check (true)', t || '_open', t);
     end if;
   end loop;
 end $$;
+-- Real names and shapes of the pre-043 policies (021, 022, 023, 028).
+create policy projects_insert_shared on public.projects for insert to authenticated with check (user_id = auth.uid());
+create policy projects_update_shared on public.projects for update to authenticated using (true) with check (true);
+create policy projects_delete_shared on public.projects for delete to authenticated using (true);
+create policy client_folders_insert on public.client_folders for insert to authenticated with check (user_id = auth.uid());
+create policy client_folders_update on public.client_folders for update to authenticated using (true) with check (true);
+create policy client_folders_delete on public.client_folders for delete to authenticated using (true);
+create policy client_files_insert on public.client_files for insert to authenticated with check (user_id = auth.uid());
+create policy client_files_update on public.client_files for update to authenticated using (true) with check (true);
 -- Pre-041 admin-only policies that 041 replaces.
-create policy client_files_write_open on public.client_files for insert to authenticated with check (true);
-create policy client_files_update_open on public.client_files for update to authenticated using (true) with check (true);
 create policy clients_insert on public.clients for insert to authenticated with check (public.is_abapfy_admin());
 create policy client_files_delete_admin on public.client_files for delete to authenticated using (public.is_abapfy_admin() and deleted_at is not null);
 create policy client_files_storage_delete_admin on storage.objects for delete to authenticated using (bucket_id = 'client-files' and public.is_abapfy_admin());

@@ -37,7 +37,8 @@ test('041_workspaces.sql migrates users, isolates data and enforces roles', { sk
         ['tests/sql/workspaces-pre041.sql'],
         ['tests/sql/workspaces-seed.sql'],
         ['supabase/sql/041_workspaces.sql'],
-        ['tests/sql/workspaces-041.test.sql']
+        ['tests/sql/workspaces-041.test.sql'],
+        ['tests/sql/workspaces-043.test.sql']
       ]) {
         const result = psql(...step)
         assert.equal(result.status, 0, `${step[0]} failed:\n${result.stderr}`)
