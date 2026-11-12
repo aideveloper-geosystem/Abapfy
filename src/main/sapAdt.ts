@@ -106,6 +106,9 @@ async function readConnections(userId: string): Promise<StoredConnection[]> {
     const data = JSON.parse(await readFile(fileFor(userId), 'utf8'))
     if (data.version !== 1 || !Array.isArray(data.connections) || data.connections.length > 30)
       throw new Error('Configurações ADT inválidas.')
+    // Ambientes ADT são pessoais: um arquivo copiado de outra conta nunca é aceito.
+    if (data.ownerId !== undefined && data.ownerId !== userId)
+      throw new Error('Estas conexões SAP pertencem a outra conta.')
     return data.connections.map((row: StoredConnection) => {
       const { encryptedPassword, ...config } = row
       if (
@@ -131,7 +134,7 @@ async function store(userId: string, rows: StoredConnection[]): Promise<void> {
   const file = fileFor(userId),
     temp = `${file}.${randomUUID()}.tmp`
   await mkdir(join(app.getPath('userData'), 'sap-adt'), { recursive: true })
-  await writeFile(temp, JSON.stringify({ version: 1, connections: rows }, null, 2), { mode: 0o600 })
+  await writeFile(temp, JSON.stringify({ version: 1, ownerId: userId, connections: rows }, null, 2), { mode: 0o600 })
   await rename(temp, file)
 }
 export async function saveSapAdtConnection(

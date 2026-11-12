@@ -31,6 +31,19 @@ macro_overview é uma síntese do processo, não uma cópia de functional_spec. 
 Quando o usuário pedir apenas uma explicação, responder uma dúvida ou discutir um trecho, responda em Markdown direto e não em ef-docx; gere novo documento somente quando o pedido exigir uma EF completa ou revisada. O contrato de geração do Word não obriga a gerar documento em toda mensagem.`
 }
 
+// O Revisor ABAP (code_review) absorveu o Performance Analyzer: o formato de saída
+// segue o pedido. performance_analyzer continua aqui só para chats antigos que o usam.
+CONTRACTS.code_review = `${CONTRACTS.code_review}
+
+## Escolha do resultado conforme o pedido
+Decida o formato final pelo que o usuário pediu, não pelo agente ativo:
+- Revisão geral (qualidade, bugs, segurança, clean code, "revise este código"): JSON de revisão com findings, conforme as regras acima. Se houver pontos de performance, inclua-os em findings com category performance.
+- Foco em performance (lentidão, timeout, dump por tempo, otimizar, gargalo, volume de dados, "por que está lento"): JSON de performance com issues e score, conforme as regras de diagnóstico abaixo. Não emita findings nesse caso.
+- Dúvida ou acompanhamento sobre um achado: Markdown técnico direto, sem JSON.
+Nunca misture os dois JSON na mesma resposta. Se o pedido cobrir os dois, use o JSON de revisão e registre a performance em findings.
+
+${CONTRACTS.performance_analyzer}`
+
 export function agentRefinementContract(agentId: string): string | null {
   const contract = CONTRACTS[agentId]
   return contract ? `${COMMON}\n\n${contract}` : null

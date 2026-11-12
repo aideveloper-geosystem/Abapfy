@@ -27,3 +27,15 @@ export const MCP_PRESETS: McpPreset[] = [
   { id: 'github', slug: 'github', name: 'GitHub', description: 'Repositórios, issues e pull requests. Requer token no ambiente local.', transport: 'streamable_http', url: 'https://api.githubcopilot.com/mcp/', command: null, args: [], local: { headers: { Authorization: 'Bearer ${GITHUB_MCP_TOKEN}' } }, documentation: 'https://github.com/github/github-mcp-server' },
   { id: 'playwright', slug: 'playwright', name: 'Playwright', description: 'Inspeção e automação de navegador em perfil isolado.', transport: 'stdio', url: null, command: npx, args: ['--yes', '@playwright/mcp', '--isolated'], documentation: 'https://github.com/microsoft/playwright-mcp' }
 ]
+
+/**
+ * MCPs globais: valem para todos os usuários e agentes, sem cadastro no Supabase
+ * e sem vínculo por usuário/agente. Os ids são fixos para que a configuração
+ * local (perfil SAP) de cada conta continue sendo gravada por servidor.
+ */
+export const GLOBAL_MCP_IDS: Record<string, string> = {
+  'sap-docs': '00000000-0000-4000-8000-00000000d0c5',
+  'sap-abap': '00000000-0000-4000-8000-00000000abab'
+}
+export const GLOBAL_MCP_SLUGS = Object.keys(GLOBAL_MCP_IDS)
+export const isGlobalMcpSlug = (slug: string): boolean => GLOBAL_MCP_SLUGS.includes(slug)

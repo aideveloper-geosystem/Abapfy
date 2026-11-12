@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { supabase } from '@renderer/lib/supabaseClient'
 import { useAuthStore } from '@renderer/store/authStore'
 import type { AgentSource } from '@renderer/store/agentsStore'
+import { GLOBAL_MCP_IDS, MCP_PRESETS, isGlobalMcpSlug } from '@renderer/lib/mcpPresets'
 import type { McpLocalConfig, McpLocalServerConfig } from '../../../preload/index.d'
 
 export type McpTransport = 'streamable_http' | 'stdio'
@@ -16,6 +17,8 @@ export interface McpServerItem {
   command: string | null
   args: string[]
   enabled: boolean
+  /** global = igual para todos (docs e abap); personal = cadastrado e ativado pelo próprio usuário. */
+  scope?: 'global' | 'personal'
   cwd?: string
   env?: Record<string, string>
   headers?: Record<string, string>
@@ -41,7 +44,7 @@ interface McpState {
   updateServer: (id: string, changes: Partial<Omit<McpServerItem, 'id'>>) => Promise<void>
   removeServer: (id: string) => Promise<void>
   toggleBinding: (serverId: string, agentSource: AgentSource, agentId: string) => Promise<void>
-  configsForAgent: (agentSource: AgentSource, agentId: string) => McpServerItem[]
+  configsForAgent: (agentSource?: AgentSource, agentId?: string) => McpServerItem[]
   reset: () => void
 }
 
@@ -89,16 +92,29 @@ function mapServer(row: ServerRow): McpServerItem {
   }
 }
 
+/** MCPs globais, iguais para todas as contas. Só o perfil SAP é pessoal. */
+export function globalMcpServers(): McpServerItem[] {
+  return MCP_PRESETS.filter((preset) => isGlobalMcpSlug(preset.slug)).map((preset) => ({
+    id: GLOBAL_MCP_IDS[preset.slug], slug: preset.slug, name: preset.name, description: preset.description,
+    transport: preset.transport, url: preset.url, command: preset.command,
+    // O perfil padrão do preset (DEV100) nunca é herdado: cada usuário informa o próprio.
+    args: stripProfile(preset.args), enabled: true, scope: 'global' as const
+  }))
+}
+
+function stripProfile(args: string[]): string[] {
+  const index = args.indexOf('--profile')
+  return index === -1 ? args : args.filter((_arg, position) => position !== index && position !== index + 1)
+}
+
 export function effectiveMcpServer(server: McpServerItem, local?: McpLocalServerConfig): McpServerItem {
   if (!local) return server
   const profile = local.profile?.trim()
-  const args = profile && server.slug === 'sap-abap'
-    ? server.args.includes('--profile')
-      ? server.args.map((arg, index) => server.args[index - 1] === '--profile' ? profile : arg)
-      : [...server.args, '--profile', profile]
+  const args = server.slug === 'sap-abap'
+    ? profile ? [...stripProfile(server.args), '--profile', profile] : stripProfile(server.args)
     : server.args
   return { ...server, cwd: local.cwd, env: local.env, headers: local.headers, disabledTools: local.disabledTools,
-    // A identidade do servidor é definida pelo cadastro administrado.
+    // A identidade do servidor não pode ser trocada pela configuração local.
     args, url: server.url, command: server.command }
 }
 
@@ -129,7 +145,10 @@ export const useMcpStore = create<McpState>((set, get) => ({
 
     if (currentUserId() !== userId) return
 
-    const mappedServers = ((serverRows as ServerRow[] | null) ?? []).map(mapServer)
+    // Docs e ABAP são globais (código); linhas antigas desses slugs no banco são ignoradas.
+    const personalServers = ((serverRows as ServerRow[] | null) ?? []).map(mapServer)
+      .filter((server) => !isGlobalMcpSlug(server.slug)).map((server) => ({ ...server, scope: 'personal' as const }))
+    const mappedServers = [...globalMcpServers(), ...personalServers]
     const mappedBindings = ((bindingRows as BindingRow[] | null) ?? []).map((row) => ({
       id: row.id, serverId: row.server_id, agentSource: row.agent_source, agentId: row.agent_id, enabled: row.enabled
     }))
@@ -138,10 +157,9 @@ export const useMcpStore = create<McpState>((set, get) => ({
     if (!localError) {
       try {
         localConfig = await window.api.mcp.saveLocalCatalog(userId, {
-          servers: mappedServers.map((server) => ({ id: server.id, slug: server.slug, name: server.name, transport: server.transport,
+          servers: personalServers.map((server) => ({ id: server.id, slug: server.slug, name: server.name, transport: server.transport,
             url: server.url, command: server.command, args: server.args, enabled: server.enabled })),
-          bindings: mappedBindings.map((binding) => ({ serverId: binding.serverId, agentSource: binding.agentSource,
-            agentId: binding.agentId, enabled: binding.enabled }))
+          bindings: []
         })
       } catch (cause) { localError = (cause as Error).message }
     }
@@ -159,7 +177,7 @@ export const useMcpStore = create<McpState>((set, get) => ({
 
   updateServer: async (id, changes) => {
     const userId = currentUserId()
-    if (!userId || !useAuthStore.getState().role) { set({ error: 'Apenas master e administradores podem configurar integrações.' }); return }
+    if (!userId) return
     const payload: Record<string, unknown> = {}
     if (changes.name !== undefined) payload.name = changes.name
     if (changes.description !== undefined) payload.description = changes.description || null
@@ -184,7 +202,7 @@ export const useMcpStore = create<McpState>((set, get) => ({
 
   removeServer: async (id) => {
     const userId = currentUserId()
-    if (!userId || !useAuthStore.getState().role) { set({ error: 'Apenas master e administradores podem configurar integrações.' }); return }
+    if (!userId) return
     const { error } = await supabase.from('mcp_servers').delete().eq('user_id', userId).eq('id', id)
     if (error) {
       set({ error: error.message })
@@ -199,7 +217,7 @@ export const useMcpStore = create<McpState>((set, get) => ({
 
   toggleBinding: async (serverId, agentSource, agentId) => {
     const userId = currentUserId()
-    if (!userId || !useAuthStore.getState().role) { set({ error: 'Apenas master e administradores podem configurar integrações.' }); return }
+    if (!userId) return
     const existing = get().bindings.find(
       (binding) =>
         binding.serverId === serverId &&
@@ -243,19 +261,18 @@ export const useMcpStore = create<McpState>((set, get) => ({
     }))
   },
 
-  configsForAgent: (agentSource, agentId) => {
-    const activeServerIds = new Set(
-      get()
-        .bindings.filter(
-          (binding) =>
-            binding.enabled && binding.agentSource === agentSource && binding.agentId === agentId
-        )
-        .map((binding) => binding.serverId)
-    )
+  // Sem vínculo por agente: todo MCP global ou pessoal ativo vale para qualquer agente.
+  configsForAgent: () => {
     const projectServers = new Set(['ui5', 'cap', 'fiori'])
-    return get().servers.filter((server) => server.enabled && activeServerIds.has(server.id) &&
-      (!projectServers.has(server.slug) || Boolean(get().localConfig.servers[server.id]?.cwd)))
-      .map((server) => effectiveMcpServer(server, get().localConfig.servers[server.id]))
+    const { servers, localConfig } = get()
+    return servers.filter((server) => {
+      if (!server.enabled) return false
+      const local = localConfig.servers[server.id]
+      // Servidores que operam sobre pasta/perfil local só entram depois que o usuário os configura.
+      if (projectServers.has(server.slug)) return Boolean(local?.cwd)
+      if (server.slug === 'sap-abap') return Boolean(local?.profile?.trim())
+      return true
+    }).map((server) => effectiveMcpServer(server, localConfig.servers[server.id]))
   },
 
   reset: () => set({ loaded: false, loading: false, servers: [], bindings: [], localConfig: { version: 1, servers: {}, catalog: { servers: [], bindings: [] } }, error: null })

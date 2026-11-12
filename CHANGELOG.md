@@ -6,6 +6,25 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.11] - 2026-11-12
+
+### Roteamento e agentes
+
+- Roteador mais preciso: escolhe o agente pela ação pedida e não pelas palavras citadas. Ler/entender uma EF existente e programar a partir dela vai para o Abaper; explicar código vai para análise de código, não para consultoria.
+- O roteador passa a receber o pedido escrito, os nomes dos anexos e trechos limitados de anexos, pasta e workbook.
+- Catálogo consolidado: o Abaper absorve o Editor e ganha modos de editar, explicar/depurar e ler EF; o Revisor ABAP absorve o Performance Analyzer e escolhe o formato (achados ou performance) pelo pedido; o Consultor SAP vira o consultor universal de dúvidas. Editor e Performance Analyzer ficam desativados, sem remoção.
+- Skills: apenas SAP ABAP, ABAP CDS e SQLScript vêm ligadas por padrão; as demais são opcionais. Preferências já salvas são mantidas.
+
+### MCP e SAP ADT
+
+- SAP Docs e SAP ABAP são globais para todos os usuários e agentes. O SAP ABAP só entra nas conversas depois que o usuário informa o próprio perfil SAP.
+- Os demais MCPs são pessoais: cada usuário cadastra, ativa e configura os seus. Fim da gestão de MCP por usuário e dos vínculos por agente.
+- As conexões SAP ADT passam a registrar a conta proprietária e recusam arquivos de outra conta.
+
+### Banco de dados
+
+- Aplicar as migrações `038_user_managed_mcp.sql`, `039_consolidate_default_agents.sql` e `040_merge_performance_into_code_review.sql` no Supabase.
+
 ## [1.0.10] - 2026-11-03
 
 ### Fluxos de agentes e hooks

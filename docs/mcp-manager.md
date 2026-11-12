@@ -2,9 +2,12 @@
 
 ## Organização
 
-Em **Configurações → MCP**, MASTER/ADMIN selecionam um usuário, cadastram servidores Streamable HTTP ou `stdio`, ativam/desativam integrações e vinculam cada servidor aos agentes autorizados. Usuários comuns consultam as integrações recebidas e preenchem apenas os parâmetros da própria conexão local.
+- **Globais (todos os usuários e agentes):** SAP Docs e SAP ABAP. Vêm do próprio aplicativo, sem cadastro no Supabase e sem vínculo por agente. O SAP ABAP só entra nas conversas depois que o usuário informa o **próprio perfil SAP** em Conexão local (o perfil padrão do preset não é herdado, para que ninguém use o ambiente de outra pessoa).
+- **Pessoais (demais MCPs):** cada usuário adiciona do catálogo, cadastra, importa, ativa/desativa e configura os próprios servidores em **Configurações → MCP**. Servidor ativo vale para todos os agentes da conta; não há mais vínculo por agente nem gestão de MCP de outros usuários.
 
-O administrador também pode importar uma configuração comum de clientes MCP com `mcpServers` ou `servers`, por exemplo `{"mcpServers":{"meu-servidor":{"command":"npx","args":["-y","meu-pacote"]}}}`. URL, comando e argumentos passam a fazer parte do cadastro administrado. Ao importar para a própria conta, `cwd`, `env` e `headers` vão ao JSON local. A importação de vários servidores é sequencial; se houver erro durante a gravação, os anteriores podem já ter sido criados e devem ser conferidos na lista.
+Migração `038_user_managed_mcp.sql` devolve a cada usuário o acesso às próprias linhas de `mcp_servers`. Vínculos antigos em `mcp_agent_bindings` são ignorados.
+
+O usuário também pode importar uma configuração comum de clientes MCP com `mcpServers` ou `servers`, por exemplo `{"mcpServers":{"meu-servidor":{"command":"npx","args":["-y","meu-pacote"]}}}`. URL, comando e argumentos passam a fazer parte do cadastro do servidor. Ao importar para a própria conta, `cwd`, `env` e `headers` vão ao JSON local. A importação de vários servidores é sequencial; se houver erro durante a gravação, os anteriores podem já ter sido criados e devem ser conferidos na lista.
 Não inclua segredos na URL ou nos argumentos, pois esses campos são persistidos no Supabase e aparecem no retrato local. Use variáveis de ambiente ou headers locais para credenciais.
 Referências comuns como `${input:github_mcp_pat}` e `${env:GITHUB_MCP_PAT}` são convertidas na importação para `${GITHUB_MCP_PAT}`; configure a variável no sistema antes de abrir o Abapfy. O transporte SSE legado não é aceito pelo importador.
 

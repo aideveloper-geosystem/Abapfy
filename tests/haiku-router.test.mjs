@@ -81,3 +81,12 @@ test('Haiku 5.5 supports effort without inheriting Opus and Sonnet server-side f
   assert.equal(models.claudeModelParams('claude-haiku-4-5-20251001', { maxTokens: 300, thinkingMaxTokens: 16000 }).output_config, undefined)
   assert.equal(models.claudeModelParams('claude-sonnet-5-5', { maxTokens: 300, thinkingMaxTokens: 16000 }).fallbacks, 'default')
 })
+
+test('router prompt separates reading an existing EF and explaining code from creating specs or functional consulting', async () => {
+  const f = fixture(answer({ agent_id: 'abap', skill_ids: [] }))
+  await f.api.routeConversation('key', 'Leia e entenda a EF ZS Objetos', agents, skills)
+  const system = f.requests[0].body.system
+  assert.match(system, /EF JÁ EXISTENTE/)
+  assert.match(system, /Consultor SAP/)
+  assert.match(system, /"intent"/)
+})

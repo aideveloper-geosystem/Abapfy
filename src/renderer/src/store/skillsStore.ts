@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { supabase } from '@renderer/lib/supabaseClient'
 import { useAuthStore } from '@renderer/store/authStore'
-import { BUILTIN_SKILLS, type SkillCategory } from '@renderer/lib/skillsCatalog'
+import { BUILTIN_SKILLS, isSkillEnabledByDefault, type SkillCategory } from '@renderer/lib/skillsCatalog'
 
 export interface SkillItem {
   id: string | null
@@ -65,7 +65,7 @@ function mergeCatalogWithRows(rows: SkillRow[]): SkillItem[] {
       category: skill.category,
       isBuiltin: true,
       contentMd: null,
-      enabled: row ? row.enabled : true
+      enabled: row ? row.enabled : isSkillEnabledByDefault(skill.slug)
     }
   })
 
@@ -96,7 +96,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     category: skill.category,
     isBuiltin: true,
     contentMd: null,
-    enabled: true
+    enabled: isSkillEnabledByDefault(skill.slug)
   })),
 
   load: async () => {

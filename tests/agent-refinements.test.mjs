@@ -270,3 +270,10 @@ test('DTec structured parameters become tables with localized headings and escap
   assert.match(html, /Fluxo de processamento/)
   assert.equal(html.includes('<script>'), false)
 })
+
+test('code_review covers review and performance formats and never mixes them', () => {
+  const contract = policy.agentRefinementContract('code_review')
+  assert.match(contract, /findings/)
+  assert.match(contract, /issues/)
+  assert.match(contract, /Nunca misture os dois JSON/)
+})

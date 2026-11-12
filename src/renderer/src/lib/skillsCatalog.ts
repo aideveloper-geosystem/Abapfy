@@ -9,6 +9,15 @@ export interface BuiltinSkill {
   description: string
 }
 
+/**
+ * Skills ligadas por padrão para quem ainda não mexeu em nenhuma. As demais (BTP, SAC,
+ * HANA, UI5, CAP, IA) são opt-in: cada skill ligada entra no catálogo lido pelo roteador
+ * e pode injetar até 8000 caracteres no prompt. Quem já tem preferência salva no banco
+ * não é afetado.
+ */
+export const DEFAULT_ENABLED_SKILL_SLUGS: readonly string[] = ['sap-abap', 'sap-abap-cds', 'sap-sqlscript']
+export const isSkillEnabledByDefault = (slug: string): boolean => DEFAULT_ENABLED_SKILL_SLUGS.includes(slug)
+
 export const SKILL_CATEGORY_LABELS: Record<SkillCategory, string> = {
   abap: 'ABAP',
   ai: 'Inteligência Artificial',

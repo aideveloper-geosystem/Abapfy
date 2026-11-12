@@ -676,6 +676,23 @@ export interface RouteResult {
 }
 
 /**
+ * Regras de desambiguação do roteador. O erro mais comum é escolher o agente
+ * pelo SUBSTANTIVO citado (EF, SAP) em vez da AÇÃO pedida (ler, entender,
+ * programar, explicar). Por isso o modelo deve primeiro descrever a intenção
+ * e só então escolher o agente.
+ */
+const AGENT_ROUTER_SYSTEM = `Você é o roteador de um harness de agentes SAP/ABAP. Escolha o agente pela AÇÃO que o usuário quer ver executada (verbo + entregável final), nunca pelas palavras-chave citadas.
+
+Regras de desambiguação, em ordem de prioridade:
+1. Citar "EF", "especificação funcional" ou um anexo de EF NÃO significa pedir uma EF. Agentes de EF/especificação só servem quando o entregável é ESCREVER, GERAR, REVISAR ou COMPLEMENTAR um documento de EF. Se o usuário pede para ler, entender, analisar ou resumir uma EF JÁ EXISTENTE, ou para desenvolver/programar/implementar a partir dela, o entregável é código ou entendimento técnico: escolha o agente de desenvolvimento ABAP (programador/"abaper"), nunca o de criação de EF.
+2. Código ABAP colado ou anexado e pedido para explicar, entender, depurar, otimizar, revisar ou corrigir (ex.: "por que linhas são deletadas dessa tabela", "o que esse método faz") é trabalho de desenvolvedor/analista de código ABAP. Agentes de consultoria funcional ou de processo ("Consultor SAP") NÃO devem receber pedidos centrados em código.
+3. O consultor SAP universal serve para dúvidas gerais de transações, tabelas, processo, módulos, erros e negócio, sem código como foco. O agente de customizing só quando o usuário quer o roteiro de COMO configurar algo (caminho SPRO/IMG, passos, transporte). Pedir o roteiro completo de configuração não é pedir uma EF.
+4. Agentes especialistas de nicho (enhancements, BAdI, user exit, Fiori, CDS, etc.) só quando o pedido é exatamente aquele nicho.
+5. Se dois agentes servirem, escolha o que entrega o resultado final pedido (ex.: programa pronto > documento). Use null só se realmente nenhum agente servir.
+
+Responda APENAS com um JSON válido, sem texto fora dele, neste formato exato e nesta ordem de campos: {"intent": "uma frase: ação pedida + entregável final", "agent_id": "id exato do agente do catálogo, ou null", "skill_ids": ["ids do catálogo de skills diretamente relevantes ao pedido, no máximo 5, pode ser array vazio"]}. Nunca invente ids fora dos catálogos fornecidos.`
+
+/**
  * Roteador do harness: usa sempre Claude Haiku (não-streaming) para, numa
  * única chamada, (1) classificar a mensagem inicial do usuário e ativar o
  * agente mais adequado do catálogo e (2) apontar quais skills habilitadas
@@ -701,7 +718,7 @@ export async function routeConversation(
 
   const parsed = await requestRouter(
     claudeApiKey,
-    'Você é o roteador de um harness de agentes SAP/ABAP. Dada a mensagem do usuário, responda APENAS com um JSON válido, sem nenhum texto fora dele, no formato exato: {"agent_id": "id exato do agente mais adequado do catálogo de agentes, ou null se nenhum servir bem", "skill_ids": ["ids do catálogo de skills diretamente relevantes ao pedido, no máximo 5, pode ser array vazio"]}. Nunca invente ids fora dos catálogos fornecidos.',
+    AGENT_ROUTER_SYSTEM,
     `Catálogo de agentes:\n${agentCatalog}\n\nCatálogo de skills habilitadas:\n${skillCatalog || '(nenhuma)'}\n\nMensagem do usuário:\n${userMessage}`
   )
   if (!parsed) return { agentId: null, skillIds: [] }
