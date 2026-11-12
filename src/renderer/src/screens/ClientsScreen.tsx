@@ -2,13 +2,13 @@ import { legacyExtraction, readCompleteClientFile } from '@renderer/lib/clientFo
 import { isEfModule } from '@renderer/lib/efDrive'
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { BookOpen, ChevronRight, FileText, Folder, FolderInput, FolderPlus, MessageSquarePlus, Plus, Search, Trash2, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowLeft, BookOpen, ChevronRight, FileText, Folder, FolderInput, FolderPlus, MessageSquarePlus, Pencil, Plus, Search, Star, Trash2, Upload } from 'lucide-react'
 import { supabase } from '@renderer/lib/supabaseClient'
 import { extractTextFromFile } from '@renderer/lib/attachments'
 import { useAuthStore } from '@renderer/store/authStore'
-import { useCanManageClients } from '@renderer/store/workspaceStore'
+import { useClientPermissions } from '@renderer/store/workspaceStore'
 import { useClientsStore, type Client } from '@renderer/store/clientsStore'
-import { loadModuleChatPage, useChatStore, type ChatSummary } from '@renderer/store/chatStore'
+import { useChatStore, type ChatSummary } from '@renderer/store/chatStore'
 import { ProjectKnowledgeModal } from '@renderer/components/ProjectKnowledgeModal'
 import type { ProjectSummary } from '@renderer/store/chatStore'
 import { ClientFilePreview, type ClientFileRecord } from '@renderer/components/ClientFilePreview'
@@ -17,7 +17,19 @@ import { presenceLabel, type WorkPresence, type WorkScope } from '@renderer/lib/
 import { CreatorFilter } from '@renderer/components/CreatorFilter'
 import { useAuthorNames } from '@renderer/lib/useAuthorNames'
 import { creatorLabel, matchesContent, matchesOwner, contentDate, type OwnerFilter } from '@renderer/lib/contentOwnership'
+import { ClientCatalog } from '@renderer/components/ClientCatalog'
+import { NewClientModal } from '@renderer/components/NewClientModal'
+import { RoleBadge } from '@renderer/components/RoleBadge'
+import { EMPTY_STATS, relativeActivity } from '@renderer/lib/clientCatalog'
 import './ClientsScreen.css'
+
+type ClientTab = 'overview' | 'drive' | 'projects' | 'sessions'
+const TABS: { id: ClientTab; label: string }[] = [
+  { id: 'overview', label: 'Visão geral' },
+  { id: 'drive', label: 'Drive' },
+  { id: 'projects', label: 'Projetos' },
+  { id: 'sessions', label: 'Sessões' }
+]
 
 interface ClientFolder {
   id: string
@@ -35,11 +47,16 @@ interface Props {
 }
 
 export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceError, onActivityChange }: Props): JSX.Element {
-  const { clients, modules, error, load, createClient, deleteClient, updateClient, createModule, updateModule } =
+  const { clients, modules, stats, favorites, error, load, loadStats, createClient, deleteClient, updateClient, createModule, updateModule, archiveClient, toggleFavorite } =
     useClientsStore()
   const projects = useChatStore(state => state.projects)
   const { user } = useAuthStore()
-  const canManage = useCanManageClients()
+  const perms = useClientPermissions()
+  const canManage = perms.canEdit
+  const [tab, setTab] = useState<ClientTab>('overview')
+  const [newClientOpen, setNewClientOpen] = useState(false)
+  const [clientChats, setClientChats] = useState<ChatSummary[]>([])
+  const [clientChatsState, setClientChatsState] = useState<'idle' | 'loading' | 'error'>('idle')
   const [clientId, setClientId] = useState<string | null>(null)
   const [moduleId, setModuleId] = useState<string | null>(null)
   const [files, setFiles] = useState<ClientFileRecord[]>([])
@@ -49,13 +66,8 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
   const [folderName, setFolderName] = useState<string | null>(null)
   const [movingFile, setMovingFile] = useState<ClientFileRecord | null>(null)
   const [moveTarget, setMoveTarget] = useState<string>('')
-  const [clientQuery, setClientQuery] = useState('')
-  const [clientOwner, setClientOwner] = useState<OwnerFilter>('all')
   const [contentQuery, setContentQuery] = useState('')
   const [contentOwner, setContentOwner] = useState<OwnerFilter>('all')
-  const [moduleChats, setModuleChats] = useState<ChatSummary[]>([])
-  const [chatPage, setChatPage] = useState({ loading: false, hasMore: false, offset: 0, error: '' })
-  const chatGeneration = useRef(0)
 
   const [message, setMessage] = useState<string | null>(null)
   const [editingWorkbook, setEditingWorkbook] = useState(false)
@@ -69,7 +81,7 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
   fileScope.current = JSON.stringify([user?.id, clientId, moduleId, folderId])
   const [dialogError, setDialogError] = useState<string | null>(null)
   const [editor, setEditor] = useState<{
-    mode: 'client-new' | 'client-edit' | 'module-new' | 'module-edit'
+    mode: 'client-edit' | 'module-new' | 'module-edit'
     name: string
     description: string
   } | null>(null)
@@ -95,42 +107,51 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
     () => projects.filter((p) => p.clientId === clientId),
     [projects, clientId]
   )
-  const names = useAuthorNames([...clients.map(item => item.createdBy), ...modules.map(item => item.createdBy), ...files.map(item => item.user_id), ...folders.map(item => item.user_id), ...visibleProjects.map(item => item.userId), ...moduleChats.map(item => item.userId)])
+  const names = useAuthorNames([...clients.map(item => item.createdBy), ...modules.map(item => item.createdBy), ...files.map(item => item.user_id), ...folders.map(item => item.user_id), ...visibleProjects.map(item => item.userId), ...clientChats.map(item => item.userId)])
   const author = (id: string | null | undefined): string => creatorLabel(id, names, user?.id)
   const date = contentDate
   const contentMatches = (id: string | null | undefined, ...fields: (string | null | undefined)[]): boolean => matchesOwner(id, user?.id, contentOwner) && matchesContent(contentQuery, ...fields, author(id), id ? names[id] : '')
-  const filteredClients = clients.filter(item => matchesOwner(item.createdBy, user?.id, clientOwner) && matchesContent(clientQuery, item.name, item.description, author(item.createdBy), item.createdBy ? names[item.createdBy] : ''))
   const filteredModules = modules.filter(item => item.clientId === clientId && contentMatches(item.createdBy, item.name, item.description))
   const filteredProjects = visibleProjects.filter(item => contentMatches(item.userId, item.name, item.description))
   const visibleFiles = files.filter(item => item.folder_id === folderId && contentMatches(item.user_id, item.name))
-  const visibleChats = moduleChats.filter(item => contentMatches(item.userId, item.title, item.agentName))
-  async function loadMoreChats(): Promise<void> {
-    if (!clientId || !moduleId || chatPage.loading) return
-    const generation = chatGeneration.current
-    setChatPage(state => ({ ...state, loading: true, error: '' }))
-    try {
-      const result = await loadModuleChatPage(clientId, moduleId, chatPage.offset, contentOwner)
-      if (generation !== chatGeneration.current) return
-      setModuleChats(state => [...state, ...result.chats.filter(chat => !state.some(item => item.id === chat.id))])
-      setChatPage({ loading: false, offset: chatPage.offset + result.chats.length, hasMore: result.hasMore, error: '' })
-    } catch (cause) { if (generation === chatGeneration.current) setChatPage(state => ({ ...state, loading: false, error: (cause as Error).message })) }
-  }
+  const lastSession = useRef(0)
   useEffect(() => {
-    const generation = ++chatGeneration.current
-    setModuleChats([])
-    setChatPage({ loading: Boolean(moduleId), hasMore: false, offset: 0, error: '' })
-    if (!clientId || !moduleId) return
-    void loadModuleChatPage(clientId, moduleId, 0, contentOwner).then(result => {
-      if (generation !== chatGeneration.current) return
-      setModuleChats(result.chats)
-      setChatPage({ loading: false, hasMore: result.hasMore, offset: result.chats.length, error: '' })
-    }).catch(cause => { if (generation === chatGeneration.current) setChatPage({ loading: false, hasMore: false, offset: 0, error: (cause as Error).message }) })
-    return () => { chatGeneration.current = generation + 1 }
-  }, [clientId, moduleId, contentOwner, user?.id])
+    if (!clientId || tab !== 'sessions') return
+    const request = ++lastSession.current
+    setClientChatsState('loading')
+    void supabase
+      .from('chats')
+      .select('id, title, project_id, agent_name, updated_at, client_id, module_id, user_id')
+      .eq('client_id', clientId)
+      .order('updated_at', { ascending: false })
+      .limit(100)
+      .then(({ data, error: loadError }) => {
+        if (request !== lastSession.current) return
+        if (loadError) {
+          setClientChats([])
+          setClientChatsState('error')
+          return
+        }
+        setClientChats(
+          (data ?? []).map((row) => ({
+            id: row.id,
+            title: row.title,
+            projectId: row.project_id,
+            agentName: row.agent_name,
+            updatedAt: row.updated_at,
+            clientId: row.client_id,
+            moduleId: row.module_id,
+            userId: row.user_id
+          }))
+        )
+        setClientChatsState('idle')
+      })
+  }, [clientId, tab, user?.id])
 
   useEffect(() => {
     void load()
-  }, [load])
+    void loadStats()
+  }, [load, loadStats])
   useEffect(() => {
     onActivityChange(clientId && moduleId && !showTrash
       ? { clientId, moduleId, folderId, chatId: null }
@@ -162,6 +183,7 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
     setContentOwner('all')
     setClientId(selected.id)
     setModuleId(null)
+    setTab('overview')
     setShowTrash(false)
     setWorkbook(selected.workbookMd ?? '')
     setEditingWorkbook(false)
@@ -179,7 +201,6 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
     setBusy(true)
     setDialogError(null)
     try {
-      if (editor.mode === 'client-new') await createClient(editor.name, editor.description)
       if (editor.mode === 'client-edit' && client)
         await updateClient(client, editor.name, editor.description, client.workbookMd)
       if (editor.mode === 'module-new' && client)
@@ -330,119 +351,119 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
     return path.join(' / ')
   }
 
+  const stat = client ? stats[client.id] ?? EMPTY_STATS : EMPTY_STATS
+  const isFavorite = client ? favorites.includes(client.id) : false
+  const clientModules = client ? modules.filter((item) => item.clientId === client.id) : []
+
+  function startSession(target: Client): void {
+    const first = modules.find((item) => item.clientId === target.id)
+    if (first) onNewChat(target.id, first.id, null)
+  }
+
+  async function archive(target: Client, archived: boolean): Promise<void> {
+    await act(async () => {
+      await archiveClient(target, archived)
+    })
+  }
+
+  function openDrive(moduleToOpen?: string): void {
+    setTab('drive')
+    setShowTrash(false)
+    const next = moduleToOpen ?? moduleId ?? clientModules[0]?.id ?? null
+    setModuleId(next)
+  }
+
+  function closeClient(): void {
+    setClientId(null)
+    setModuleId(null)
+    setShowTrash(false)
+    void loadStats()
+  }
+
   return (
     <main className="clients-screen">
-      <header className="clients-header">
-        <div>
-          <h1>Clientes</h1>
-          <p>Workspace compartilhado · encontre conteúdos por cliente, módulo e criador</p>
-        </div>
-        {canManage && !client && (
-          <button onClick={() => { setDialogError(null); setEditor({ mode: 'client-new', name: '', description: '' }) }}>
-            <Plus size={15} /> Novo cliente
-          </button>
-        )}
-        {client && (
-          <button className={showTrash ? 'clients-trash-toggle selected' : 'clients-trash-toggle'} onClick={() => setShowTrash((current) => !current)}>
-            <Trash2 size={15} /> {showTrash ? 'Voltar ao drive' : 'Lixeira'}
-          </button>
-        )}
-        {canManage && client && (
-          <button className="clients-delete" onClick={() => { setDialogError(null); setDeletingClient(client) }}>
-            <Trash2 size={15} /> Excluir cliente
-          </button>
-        )}
-      </header>
       {error && <p className="clients-error">{error}. Aplique a migração 021 no Supabase.</p>}
-      {message && <p className="clients-error">{message}</p>}
+      {message && <p className="clients-error" role="alert">{message}</p>}
       {presenceError && <p className="clients-error">Status de trabalho indisponível: {presenceError}</p>}
-      <div className="clients-catalog-tools">
-        <label className="clients-search"><Search size={16} /><input aria-label="Buscar clientes por nome ou criador" placeholder="Buscar cliente ou criador…" value={clientQuery} onChange={event => setClientQuery(event.target.value)} /></label>
-        <CreatorFilter label="Criador do cliente" value={clientOwner} onChange={setClientOwner} ids={clients.map(item => item.createdBy)} names={names} userId={user?.id} />
-        <span>{filteredClients.length} de {clients.length} clientes</span>
-      </div>
-      <div className="clients-layout">
-        <nav className="clients-tree">
-          <button
-            className={!client ? 'selected' : ''}
-            onClick={() => {
-              setClientId(null)
-              setModuleId(null)
-              setShowTrash(false)
-            }}
-          >
-            Todos os clientes
+
+      {!client && (
+        <ClientCatalog
+          clients={clients}
+          modules={modules}
+          stats={stats}
+          favorites={favorites}
+          userId={user?.id}
+          permissions={perms}
+          authorName={author}
+          onOpen={openClient}
+          onNewSession={startSession}
+          onToggleFavorite={(item) => void act(() => toggleFavorite(item.id))}
+          onNewClient={() => setNewClientOpen(true)}
+        />
+      )}
+
+      {client && (
+        <section className="client-page" aria-label={`Cliente ${client.name}`}>
+          <button type="button" className="client-page-back" onClick={closeClient}>
+            <ArrowLeft size={14} /> Clientes
           </button>
-          {filteredClients.map((item) => (
-            <div key={item.id}>
-              <button
-                className={clientId === item.id && !moduleId ? 'selected' : ''}
-                onClick={() => openClient(item)}
-              >
-                <Folder size={15} />
-                <span className="clients-tree-copy"><span>{item.name}</span><small>{author(item.createdBy)}</small></span>
+          <header className="client-page-head">
+            <div className="client-page-title">
+              <h1>{client.name}</h1>
+              {client.archivedAt && <em className="client-page-archived">Arquivado</em>}
+              <p>
+                {client.createdBy ? 'Criado por ' : ''}{author(client.createdBy)} · {date(client.createdAt)} · <RoleBadge role={perms.role} />
+              </p>
+            </div>
+            <div className="client-page-actions">
+              <button type="button" className={`client-page-icon ${isFavorite ? 'client-page-icon-on' : ''}`} aria-pressed={isFavorite} title={isFavorite ? 'Remover dos favoritos' : 'Favoritar'} aria-label={isFavorite ? 'Desfavoritar' : 'Favoritar'} onClick={() => void act(() => toggleFavorite(client.id))}>
+                <Star size={15} fill={isFavorite ? 'currentColor' : 'none'} />
               </button>
-              {clientId === item.id &&
-                modules
-                  .filter((m) => m.clientId === item.id)
-                  .map((m) => (
-                    <button
-                      className={`clients-module ${moduleId === m.id ? 'selected' : ''}`}
-                      key={m.id}
-                      onClick={() => { setModuleId(m.id); setShowTrash(false) }}
-                    >
-                      <FileText size={14} />
-                      {m.name}
-                      {moduleWorkLabel(m.id) && <small className="clients-work-badge" title={moduleWorkLabel(m.id) ?? ''}>Em uso</small>}
-                    </button>
-                  ))}
-            </div>
-          ))}
-        </nav>
-        <section className="clients-content">
-          {client && <div className="clients-context-summary"><span>Cliente compartilhado</span><strong>{client.name}</strong><small>{client.createdBy ? 'Criado por ' : ''}{author(client.createdBy)} · {date(client.createdAt)}</small></div>}
-          {client && !showTrash && <div className="clients-content-tools">
-            <label className="clients-search"><Search size={16} /><input aria-label="Buscar conteúdo carregado por nome ou criador" placeholder="Buscar conteúdo ou criador…" value={contentQuery} onChange={event => setContentQuery(event.target.value)} /></label>
-            <CreatorFilter label="Criador do conteúdo" value={contentOwner} onChange={setContentOwner} ids={[...modules.filter(item => item.clientId === clientId).map(item => item.createdBy), ...files.map(item => item.user_id), ...moduleChats.map(item => item.userId), ...visibleProjects.map(item => item.userId)]} names={names} userId={user?.id} />
-            {(contentOwner !== 'all' || contentQuery) && <button className="clients-clear-filters" onClick={() => { setContentOwner('all'); setContentQuery('') }}>Limpar filtros</button>}
-            <small>Busca nos itens carregados. As pastas permanecem visíveis para navegação.</small>
-          </div>}
-          {client && showTrash && <ClientTrash clientId={client.id} modules={modules.filter((item) => item.clientId === client.id)} canEmpty={canManage} />}
-          {!client && (
-            <div className="clients-grid">
-              {filteredClients.map((item) => (
-                <button className="clients-card" key={item.id} onClick={() => openClient(item)}>
-                  <Folder size={22} />
-                  <strong>{item.name}</strong>
-                  <small>
-                    {modules.filter((m) => m.clientId === item.id).length} módulos
-                  </small>
-                  <small>{item.createdBy ? 'Criado por ' : ''}{author(item.createdBy)} · {date(item.createdAt)}
-                  </small>
+              <button type="button" disabled={clientModules.length === 0 || Boolean(client.archivedAt)} onClick={() => startSession(client)}>
+                <MessageSquarePlus size={14} /> Nova sessão
+              </button>
+              {canManage && (
+                <button type="button" onClick={() => { setDialogError(null); setEditor({ mode: 'client-edit', name: client.name, description: client.description ?? '' }) }}>
+                  <Pencil size={14} /> Editar
                 </button>
-              ))}
-              {filteredClients.length === 0 && <p>{clients.length ? 'Nenhum cliente corresponde aos filtros.' : 'Nenhum cliente cadastrado.'}</p>}
+              )}
+              {canManage && (
+                <button type="button" onClick={() => void archive(client, !client.archivedAt)}>
+                  {client.archivedAt ? <ArchiveRestore size={14} /> : <Archive size={14} />} {client.archivedAt ? 'Desarquivar' : 'Arquivar'}
+                </button>
+              )}
+              {perms.canDelete && (
+                <button type="button" className="clients-delete" onClick={() => { setDialogError(null); setDeletingClient(client) }}>
+                  <Trash2 size={14} /> Excluir
+                </button>
+              )}
             </div>
-          )}
-          {client && !showTrash && !module && (
-            <>
-              <div className="clients-content-heading">
-                <h2>{client.name}</h2>
-                {canManage && (
-                  <button
-                    onClick={() =>
-                      setEditor({
-                        mode: 'client-edit',
-                        name: client.name,
-                        description: client.description ?? ''
-                      })
-                    }
-                  >
-                    Editar cliente
-                  </button>
-                )}
-              </div>
-              <p>{client.description}</p>
+          </header>
+
+          <nav className="client-page-tabs" role="tablist" aria-label="Seções do cliente">
+            {TABS.map(({ id, label }) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={tab === id}
+                onClick={() => (id === 'drive' ? openDrive() : (setTab(id), setShowTrash(false)))}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+
+          <div className="clients-content client-page-body">
+            {tab === 'overview' && (
+              <>
+                <div className="client-page-stats">
+                  <div><strong>{stat.projects}</strong><span>Projetos</span></div>
+                  <div><strong>{stat.chats}</strong><span>Sessões</span></div>
+                  <div><strong>{stat.files}</strong><span>Arquivos</span></div>
+                  <div><strong>{relativeActivity(stat.lastActivity)}</strong><span>Última atividade</span></div>
+                </div>
+                <p>{client.description || 'Sem descrição.'}</p>
               <div className="clients-section-heading">
                 <h3>Workbook.md</h3>
                 {canManage && (
@@ -492,41 +513,52 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
               <div className="clients-section-heading">
                 <h3>Módulos</h3>
                 {canManage && (
-                  <button
-                    onClick={() => setEditor({ mode: 'module-new', name: '', description: '' })}
-                  >
+                  <button onClick={() => setEditor({ mode: 'module-new', name: '', description: '' })}>
                     <Plus size={14} /> Novo módulo
                   </button>
                 )}
               </div>
               <div className="clients-grid">
                 {filteredModules.map((m) => (
-                    <button className="clients-card" key={m.id} onClick={() => setModuleId(m.id)}>
-                      <FileText size={21} />
-                      <strong>{m.name}</strong>
-                      <small>{m.description || 'Abrir conteúdo'}</small>
-                      <small>{m.createdBy ? 'Criado por ' : ''}{author(m.createdBy)} · {date(m.createdAt)}</small>
-                      {moduleWorkLabel(m.id) && <small className="clients-work-badge">{moduleWorkLabel(m.id)}</small>}
-                    </button>
-                  ))}
-              </div>
-              {filteredModules.length === 0 && <p>Nenhum módulo corresponde aos filtros.</p>}
-              <h3>Projetos</h3>
-              <div className="clients-list">
-                {filteredProjects.map((p) => (
-                  <button key={p.id} onClick={() => setKnowledgeProject(p)}>
-                    <Folder size={15} />
-                    <strong>{p.name}</strong>
-                    <small>
-                      Criado por {author(p.userId)} · {date(p.createdAt)}
-                    </small>
+                  <button className="clients-card" key={m.id} onClick={() => openDrive(m.id)}>
+                    <FileText size={21} />
+                    <strong>{m.name}</strong>
+                    <small>{m.description || 'Abrir no drive'}</small>
+                    <small>{m.createdBy ? 'Criado por ' : ''}{author(m.createdBy)} · {date(m.createdAt)}</small>
+                    {moduleWorkLabel(m.id) && <small className="clients-work-badge">{moduleWorkLabel(m.id)}</small>}
                   </button>
                 ))}
               </div>
-            </>
-          )}
-          {client && !showTrash && module && (
-            <>
+              {filteredModules.length === 0 && <p>Nenhum módulo neste cliente.</p>}
+              </>
+            )}
+
+            {tab === 'drive' && (
+              <>
+                <div className="client-page-modules" role="group" aria-label="Módulo do drive">
+                  {clientModules.map((m) => (
+                    <button key={m.id} type="button" aria-pressed={moduleId === m.id && !showTrash} onClick={() => { setModuleId(m.id); setShowTrash(false) }}>
+                      <FileText size={13} /> {m.name}
+                      {moduleWorkLabel(m.id) && <small className="clients-work-badge" title={moduleWorkLabel(m.id) ?? ''}>Em uso</small>}
+                    </button>
+                  ))}
+                  {canManage && (
+                    <button type="button" className={`clients-trash-toggle ${showTrash ? 'selected' : ''}`} aria-pressed={showTrash} onClick={() => setShowTrash((current) => !current)}>
+                      <Trash2 size={13} /> Lixeira
+                    </button>
+                  )}
+                </div>
+                {!showTrash && module && (
+                  <div className="clients-content-tools">
+                    <label className="clients-search"><Search size={16} /><input aria-label="Buscar conteúdo carregado por nome ou criador" placeholder="Buscar arquivo ou criador…" value={contentQuery} onChange={event => setContentQuery(event.target.value)} /></label>
+                    <CreatorFilter label="Criador do conteúdo" value={contentOwner} onChange={setContentOwner} ids={[...files.map(item => item.user_id), ...folders.map(item => item.user_id)]} names={names} userId={user?.id} />
+                    {(contentOwner !== 'all' || contentQuery) && <button className="clients-clear-filters" onClick={() => { setContentOwner('all'); setContentQuery('') }}>Limpar filtros</button>}
+                  </div>
+                )}
+                {showTrash && <ClientTrash clientId={client.id} modules={clientModules} canEmpty={perms.canDelete} />}
+                {!showTrash && !module && <p>Este cliente ainda não tem módulos.</p>}
+                {!showTrash && module && (
+                  <>
               <div className="clients-content-heading">
                 <div>
                   <small>{client.name}</small>
@@ -595,44 +627,55 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
                       <strong>{file.name}</strong>
                       <small>Enviado por {author(file.user_id)} · {date(file.created_at)}</small>
                     </button>
-                    <button className="clients-file-move" title="Mover arquivo" aria-label={`Mover ${file.name}`} onClick={() => { setMovingFile(file); setMoveTarget(file.folder_id ?? '') }}><FolderInput size={15} /></button>
-                    <button className="clients-file-trash" title="Mover para a lixeira" aria-label={`Remover ${file.name}`} onClick={() => void trashFile(file)}><Trash2 size={15} /></button>
+                    {perms.canEdit && <button className="clients-file-move" title="Mover arquivo" aria-label={`Mover ${file.name}`} onClick={() => { setMovingFile(file); setMoveTarget(file.folder_id ?? '') }}><FolderInput size={15} /></button>}
+                    {perms.canDelete && <button className="clients-file-trash" title="Mover para a lixeira" aria-label={`Remover ${file.name}`} onClick={() => void trashFile(file)}><Trash2 size={15} /></button>}
                   </div>
                 ))}
                 {visibleFolders.length === 0 && visibleFiles.length === 0 && <p>{contentOwner !== 'all' || contentQuery ? 'Nenhum arquivo corresponde aos filtros.' : 'Esta pasta está vazia.'}</p>}
               </div>
-              <h3>Chats <small className="clients-count">{visibleChats.length} carregados neste filtro</small></h3>
-              <div className="clients-list">
-                {visibleChats.map((chat) => (
-                  <button key={chat.id} onClick={() => onOpenChat(chat.id)}>
-                    <MessageSquarePlus size={15} />
-                    <strong>{chat.title}</strong>
-                    <small>
-                      {author(chat.userId)} · atualizado {date(chat.updatedAt)}
-                    </small>
-                    {chatWorkLabel(chat.id) && <span className="clients-work-badge">{chatWorkLabel(chat.id)}</span>}
-                  </button>
-                ))}
-                {visibleChats.length === 0 && <p>{chatPage.loading ? 'Carregando chats…' : chatPage.error ? 'Chats indisponíveis.' : 'Nenhum chat neste filtro do módulo.'}</p>}
-              </div>
-              {chatPage.error && <p className="clients-error" role="alert">{chatPage.error}</p>}
-              {(chatPage.hasMore || chatPage.error) && <button className="clients-load-more" disabled={chatPage.loading} onClick={() => void loadMoreChats()}>{chatPage.loading ? 'Carregando…' : chatPage.error ? 'Tentar carregar chats novamente' : 'Carregar mais chats'}</button>}
-              <h3>Projetos do cliente</h3>
-              <div className="clients-list">
-                {filteredProjects.map((p) => (
-                  <button key={p.id} onClick={() => setKnowledgeProject(p)}>
-                    <BookOpen size={15} />
-                    <strong>{p.name}</strong>
-                    <small>
-                      {author(p.userId)} · {date(p.createdAt)}
-                    </small>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+                  </>
+                )}
+              </>
+            )}
+
+            {tab === 'projects' && (
+              <>
+                <div className="clients-section-heading"><h3>Projetos <small className="clients-count">{filteredProjects.length}</small></h3></div>
+                <div className="clients-list">
+                  {filteredProjects.map((p) => (
+                    <button key={p.id} onClick={() => setKnowledgeProject(p)}>
+                      <BookOpen size={15} />
+                      <strong>{p.name}</strong>
+                      <small>{author(p.userId)} · {date(p.createdAt)}</small>
+                    </button>
+                  ))}
+                  {filteredProjects.length === 0 && <p>Nenhum projeto neste cliente. {canManage ? 'Crie um em Projetos.' : ''}</p>}
+                </div>
+              </>
+            )}
+
+            {tab === 'sessions' && (
+              <>
+                <div className="clients-section-heading">
+                  <h3>Sessões <small className="clients-count">{clientChats.length}</small></h3>
+                  <button disabled={clientModules.length === 0 || Boolean(client.archivedAt)} onClick={() => startSession(client)}><MessageSquarePlus size={14} /> Nova sessão</button>
+                </div>
+                <div className="clients-list">
+                  {clientChats.map((chat) => (
+                    <button key={chat.id} onClick={() => onOpenChat(chat.id)}>
+                      <MessageSquarePlus size={15} />
+                      <strong>{chat.title}</strong>
+                      <small>{author(chat.userId)} · {modules.find((item) => item.id === chat.moduleId)?.name ?? 'Módulo'} · atualizado {date(chat.updatedAt)}</small>
+                      {chatWorkLabel(chat.id) && <span className="clients-work-badge">{chatWorkLabel(chat.id)}</span>}
+                    </button>
+                  ))}
+                  {clientChats.length === 0 && <p>{clientChatsState === 'loading' ? 'Carregando sessões…' : clientChatsState === 'error' ? 'Sessões indisponíveis.' : 'Nenhuma sessão neste cliente ainda.'}</p>}
+                </div>
+              </>
+            )}
+          </div>
         </section>
-      </div>
+      )}
       {openedFile && <ClientFilePreview file={openedFile} onClose={() => setOpenedFile(null)} />}
       {folderName !== null && createPortal(
         <div className="clients-file-overlay" onMouseDown={() => setFolderName(null)}>
@@ -712,6 +755,17 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
           </form>
         </div>, document.body
       )}
+      <NewClientModal
+        open={newClientOpen}
+        clients={clients}
+        onClose={() => setNewClientOpen(false)}
+        onCreate={async (name, description, options) => {
+          const id = await createClient(name, description, options)
+          await loadStats()
+          const created = id ? useClientsStore.getState().clients.find((item) => item.id === id) : undefined
+          if (created) openClient(created)
+        }}
+      />
       <ProjectKnowledgeModal project={knowledgeProject} onClose={() => setKnowledgeProject(null)} />
     </main>
   )

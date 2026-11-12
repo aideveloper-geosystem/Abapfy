@@ -21,17 +21,49 @@ export function isWorkspaceAdmin(role: WorkspaceRole | null | undefined): boolea
 }
 
 /**
- * Who may create/edit/delete clients and purge the drive trash.
- * With migration 041 applied this follows the workspace role; before it (legacy schema)
- * it falls back to the platform roles stored in app_roles.
+ * The role used for permission checks. With migration 041 applied it is the workspace role;
+ * before it (legacy schema) the platform roles map to the closest equivalent.
  */
+export function effectiveRole(
+  workspaceRole: WorkspaceRole | null | undefined,
+  platformRole: 'MASTER' | 'ADMIN' | null | undefined,
+  legacy: boolean
+): WorkspaceRole | null {
+  if (!legacy) return workspaceRole ?? null
+  if (platformRole === 'MASTER') return 'OWNER'
+  if (platformRole === 'ADMIN') return 'ADMIN'
+  return 'MEMBER'
+}
+
+export interface ClientPermissions {
+  role: WorkspaceRole | null
+  /** Create and edit clients, modules, projects, files; archive clients; restore from trash. */
+  canEdit: boolean
+  /** Delete clients, modules, projects, folders; move files to trash and purge. OWNER only. */
+  canDelete: boolean
+  /** Every member reads and uploads. */
+  canUpload: boolean
+  canManageMembers: boolean
+}
+
+/** Mirrors migration 043. The database enforces the same matrix; the UI only hides what would be refused. */
+export function clientPermissions(role: WorkspaceRole | null | undefined): ClientPermissions {
+  return {
+    role: role ?? null,
+    canEdit: role === 'OWNER' || role === 'ADMIN',
+    canDelete: role === 'OWNER',
+    canUpload: role === 'OWNER' || role === 'ADMIN' || role === 'MEMBER',
+    canManageMembers: role === 'OWNER'
+  }
+}
+
+/** Who may create/edit clients (OWNER and ADMIN). Kept for callers that only need the edit gate. */
 export function canManageClients(
   workspaceRole: WorkspaceRole | null | undefined,
   platformRole: 'MASTER' | 'ADMIN' | null | undefined,
   legacy: boolean
 ): boolean {
-  if (legacy) return platformRole === 'MASTER' || platformRole === 'ADMIN'
-  return isWorkspaceAdmin(workspaceRole)
+  return clientPermissions(effectiveRole(workspaceRole, platformRole, legacy)).canEdit
 }
 
 /** Roles an actor may hand out when approving a request or editing a member. */
@@ -48,10 +80,8 @@ export function canRemoveMember(
   isSelf: boolean
 ): boolean {
   if (isSelf) return true
-  if (!isWorkspaceAdmin(actor)) return false
-  if (target === 'OWNER') return false
-  if (target === 'ADMIN') return actor === 'OWNER'
-  return true
+  if (actor !== 'OWNER') return false
+  return target !== 'OWNER'
 }
 
 const JOIN_CODE_PATTERN = /^[A-Z0-9]{10}$/

@@ -4,8 +4,71 @@ import { loadTs } from './load-typescript.mjs'
 
 const access = loadTs('src/renderer/src/lib/workspaceAccess.ts')
 const themes = loadTs('src/renderer/src/lib/themes.ts')
+const catalog = loadTs('src/renderer/src/lib/clientCatalog.ts')
 // Objects built inside the vm context have another realm's prototypes; compare plain copies.
 const plain = (value) => JSON.parse(JSON.stringify(value))
+
+test('role matrix: owner everything, admin edits but never deletes, member reads and uploads', () => {
+  const owner = access.clientPermissions('OWNER')
+  const admin = access.clientPermissions('ADMIN')
+  const member = access.clientPermissions('MEMBER')
+  assert.deepEqual(plain([owner.canEdit, owner.canDelete, owner.canUpload, owner.canManageMembers]), [true, true, true, true])
+  assert.deepEqual(plain([admin.canEdit, admin.canDelete, admin.canUpload, admin.canManageMembers]), [true, false, true, false])
+  assert.deepEqual(plain([member.canEdit, member.canDelete, member.canUpload, member.canManageMembers]), [false, false, true, false])
+  const outsider = access.clientPermissions(null)
+  assert.deepEqual(plain([outsider.canEdit, outsider.canDelete, outsider.canUpload]), [false, false, false])
+})
+
+test('legacy platform roles map to owner, admin and member', () => {
+  assert.equal(access.effectiveRole(null, 'MASTER', true), 'OWNER')
+  assert.equal(access.effectiveRole(null, 'ADMIN', true), 'ADMIN')
+  assert.equal(access.effectiveRole(null, null, true), 'MEMBER')
+  assert.equal(access.effectiveRole('MEMBER', 'MASTER', false), 'MEMBER', 'workspace role wins once 041 is applied')
+})
+
+test('only the owner removes other people, everyone can leave', () => {
+  assert.equal(access.canRemoveMember('ADMIN', 'MEMBER', false), false)
+  assert.equal(access.canRemoveMember('OWNER', 'MEMBER', false), true)
+  assert.equal(access.canRemoveMember('OWNER', 'ADMIN', false), true)
+  assert.equal(access.canRemoveMember('OWNER', 'OWNER', false), false)
+  assert.equal(access.canRemoveMember('MEMBER', 'MEMBER', true), true)
+})
+
+const clients = [
+  { id: 'a', name: 'Álamo', description: 'ERP', createdBy: 'u1', archivedAt: null },
+  { id: 'b', name: 'Beta', description: null, createdBy: 'u2', archivedAt: null },
+  { id: 'c', name: 'Cacau', description: 'Chocolate', createdBy: 'u1', archivedAt: '2026-01-01' }
+]
+const stats = { a: { projects: 1, chats: 9, files: 2, lastActivity: '2026-05-01' }, b: { projects: 5, chats: 1, files: 0, lastActivity: '2026-06-01' } }
+const names = { u1: 'Paulo', u2: 'Ana' }
+const authorName = (id) => names[id] ?? '—'
+const base = { filter: 'all', query: '', creator: null, userId: 'u1', favorites: [], authorName }
+
+test('catalog filters: chips, creator and accent-insensitive search; archived are separate', () => {
+  const ids = (options) => plain(catalog.filterClients(clients, { ...base, ...options }).map((c) => c.id))
+  assert.deepEqual(ids({}), ['a', 'b'])
+  assert.deepEqual(ids({ filter: 'mine' }), ['a'])
+  assert.deepEqual(ids({ filter: 'favorites', favorites: ['b', 'c'] }), ['b'])
+  assert.deepEqual(ids({ filter: 'archived' }), ['c'])
+  assert.deepEqual(ids({ creator: 'u2' }), ['b'])
+  assert.deepEqual(ids({ query: 'alamo' }), ['a'])
+  assert.deepEqual(ids({ query: 'ana' }), ['b'], 'search includes the creator name')
+  assert.deepEqual(ids({ query: 'zzz' }), [])
+})
+
+test('catalog sorting by column, direction toggle and favorites pinned on top', () => {
+  const order = (key, dir) => plain(catalog.sortClients(clients, { key, dir }, stats, authorName).map((c) => c.id))
+  assert.deepEqual(order('name', 'asc'), ['a', 'b', 'c'])
+  assert.deepEqual(order('chats', 'desc'), ['a', 'b', 'c'])
+  assert.deepEqual(order('projects', 'desc'), ['b', 'a', 'c'])
+  assert.deepEqual(order('lastActivity', 'desc'), ['b', 'a', 'c'])
+  assert.deepEqual(order('creator', 'asc'), ['b', 'a', 'c'])
+  assert.deepEqual(plain(catalog.pinFavorites(clients, ['c']).map((c) => c.id)), ['c', 'a', 'b'])
+  assert.deepEqual(plain(catalog.nextSort({ key: 'name', dir: 'asc' }, 'name')), { key: 'name', dir: 'desc' })
+  assert.deepEqual(plain(catalog.nextSort({ key: 'name', dir: 'asc' }, 'files')), { key: 'files', dir: 'desc' })
+  assert.equal(catalog.relativeActivity(null), 'Sem atividade')
+  assert.equal(catalog.relativeActivity('2026-06-10T10:00:00Z', new Date('2026-06-11T12:00:00Z')), 'Ontem')
+})
 
 test('workspace admins manage clients; legacy schema falls back to platform roles', () => {
   assert.equal(access.canManageClients('OWNER', null, false), true)
@@ -21,7 +84,7 @@ test('assignable roles and member removal mirror the database rules', () => {
   assert.deepEqual(plain(access.assignableRoles('OWNER')), ['OWNER', 'ADMIN', 'MEMBER'])
   assert.deepEqual(plain(access.assignableRoles('ADMIN')), ['MEMBER'])
   assert.deepEqual(plain(access.assignableRoles('MEMBER')), [])
-  assert.equal(access.canRemoveMember('ADMIN', 'MEMBER', false), true)
+  assert.equal(access.canRemoveMember('ADMIN', 'MEMBER', false), false)
   assert.equal(access.canRemoveMember('ADMIN', 'ADMIN', false), false)
   assert.equal(access.canRemoveMember('OWNER', 'ADMIN', false), true)
   assert.equal(access.canRemoveMember('OWNER', 'OWNER', false), false)

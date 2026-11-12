@@ -6,11 +6,23 @@ Este documento descreve o modelo de workspaces (migração `041`), os temas (mig
 
 Um workspace reúne pessoas e clientes. Cada pessoa pertence a **um** workspace (`unique(user_id)` em `workspace_members`; a restrição pode ser removida se um dia houver mais de um por pessoa).
 
-| Papel | Pode |
-| --- | --- |
-| `OWNER` (proprietário) | Tudo do administrador, mais alterar papéis, remover administradores e promover a proprietário. |
-| `ADMIN` (administrador) | Ver e gerar o código de entrada, aprovar ou recusar pedidos (como membro), remover membros, criar, editar e excluir clientes, esvaziar a lixeira do drive. |
-| `MEMBER` (membro) | Usar clientes, projetos, sessões e o drive compartilhado. |
+| Ação | Proprietário | Administrador | Membro |
+| --- | :---: | :---: | :---: |
+| Ler clientes, módulos, projetos, sessões e drive | sim | sim | sim |
+| Enviar arquivos ao drive e criar pastas | sim | sim | sim |
+| Criar e editar clientes e módulos | sim | sim | não |
+| Arquivar e desarquivar clientes | sim | sim | não |
+| Criar e editar projetos | sim | sim | não |
+| Editar e mover arquivos, restaurar da lixeira | sim | sim | não |
+| Excluir clientes, módulos, projetos e pastas | sim | **não** | não |
+| Mover arquivos para a lixeira e esvaziá-la | sim | **não** | não |
+| Aprovar ou recusar pedidos de entrada, gerar código | sim | sim | não |
+| Remover pessoas e alterar papéis | sim | não | não |
+| Sair do workspace | sim | sim | sim |
+
+Sessões (chats) ficam abertas a todos os membros, porque são a forma de trabalhar. Mover arquivo para a lixeira conta como exclusão, então o administrador não faz isso; ele consegue restaurar o que o proprietário apagou. Criar pasta fica liberado para qualquer membro porque os fluxos de envio e a geração de documentos pelo agente criam pastas.
+
+A matriz é aplicada por RLS e gatilhos na migração `043_workspace_role_permissions.sql` e espelhada na interface por `clientPermissions` (`src/renderer/src/lib/workspaceAccess.ts`). A interface esconde o que seria recusado, mas nunca é a única barreira. Parâmetros compartilhados de cliente, conhecimento de projeto e acesso ao workspace continuam com as regras anteriores e ficam para uma segunda etapa.
 
 Regras que o banco garante: o workspace sempre tem ao menos um proprietário; o proprietário não pode ser removido por outra pessoa; só o proprietário concede `ADMIN`; qualquer pessoa pode sair.
 
@@ -53,6 +65,7 @@ No SQL Editor do Supabase, nesta ordem:
 
 1. `supabase/sql/041_workspaces.sql`
 2. `supabase/sql/042_abapfy_themes.sql`
+3. `supabase/sql/043_workspace_role_permissions.sql`
 
 Enquanto a 041 não estiver aplicada, o app detecta a ausência da função `my_workspace` e funciona no modo anterior (sem tela de workspace e com permissões pelos papéis globais).
 
@@ -60,6 +73,14 @@ Enquanto a 041 não estiver aplicada, o app detecta a ausência da função `my_
 
 - `tests/workspaces-sql.test.mjs` sobe um PostgreSQL temporário (`initdb` em pasta temporária) e executa `tests/sql/workspaces-pre041.sql` (esquema simplificado antes da 041), `tests/sql/workspaces-seed.sql` (MASTER, ADMIN e dois usuários comuns com conteúdo), a migração e `tests/sql/workspaces-041.test.sql`. Cobre migração de usuários, idempotência, isolamento entre workspaces, fluxo de pedido e aprovação, regras de papéis e leitura do código de entrada. O teste é ignorado quando não há binários do PostgreSQL; use `PG_BIN` para apontar a pasta `bin`.
 - `tests/workspaces.test.mjs` cobre as regras de acesso, a store e os temas.
+
+## Tela de Clientes
+
+- **Catálogo:** tabela densa (cliente, projetos, sessões, arquivos, última atividade, criador) com ordenação por coluna e alternador para grade, que o app lembra. Chips Todos, Meus, Favoritos e Arquivados com contagem; busca por nome, descrição e criador; criador como filtro avançado em popover. Favoritar é por usuário (`client_favorites`). "Nova sessão" em cada linha abre a Nova sessão já no cliente.
+- **Página do cliente:** cabeçalho com nome, criador, selo do papel e ações permitidas, e abas Visão geral (números, descrição, workbook, módulos), Drive (módulos, arquivos, pastas e lixeira), Projetos e Sessões.
+- **Arquivar:** proprietário e administrador arquivam e desarquivam (`clients.archived_at`, com autor registrado pelo servidor). Só o proprietário exclui definitivamente. Cliente arquivado fica fora de Todos e continua legível.
+- **Novo cliente:** nome, módulos (Programas, EFs e DTECs vêm do modelo padrão; outros opcionais) e, se quiser, copiar o workbook de outro cliente.
+- **Segunda etapa:** parâmetros do cliente, template de EF, aba de acesso por cliente e arquivamento de projetos.
 
 ## Interface
 

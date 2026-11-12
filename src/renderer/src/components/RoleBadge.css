@@ -1,0 +1,21 @@
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 9px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-4);
+  color: var(--color-ink-muted);
+  font: 600 11px var(--font-text);
+  vertical-align: middle;
+}
+
+.role-badge-owner {
+  background: var(--color-accent-soft);
+  color: var(--color-primary);
+}
+
+.role-badge-admin {
+  background: color-mix(in srgb, var(--color-semantic-warning) 16%, transparent);
+  color: var(--color-semantic-warning);
+}

@@ -385,3 +385,35 @@
 @media (max-width: 760px) { .clients-catalog-tools { align-items: stretch; } .clients-layout { grid-template-columns: minmax(0, 1fr); } .clients-tree { max-height: 230px; overflow-y: auto; } .clients-context-summary > small { margin-left: 0; } .clients-list > button, .clients-file-open { flex-wrap: wrap; } .clients-list small { max-width: none; flex-basis: 100%; text-align: left; padding-left: 26px; } }
 
 .clients-clear-filters:hover, .clients-load-more:hover:not(:disabled) { background: var(--color-surface-3); border-color: var(--color-primary); }
+
+/* ---- Client page: header, tabs, overview stats, drive module chips ---- */
+.client-page { display: flex; flex-direction: column; gap: var(--space-md); min-width: 0; }
+.client-page-back { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border-radius: var(--radius-sm); color: var(--color-ink-subtle); font-size: 12px; }
+.client-page-back:hover { background: var(--color-hover); color: var(--color-ink); }
+.client-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-md); flex-wrap: wrap; }
+.client-page-title { display: flex; align-items: center; flex-wrap: wrap; gap: 6px var(--space-sm); min-width: 0; }
+.client-page-title h1 { font: 600 24px var(--font-display); letter-spacing: -0.4px; }
+.client-page-title p { flex-basis: 100%; display: flex; align-items: center; gap: 6px; color: var(--color-ink-subtle); font-size: 12.5px; }
+.client-page-archived { padding: 2px 9px; border-radius: var(--radius-pill); background: var(--color-surface-4); color: var(--color-ink-subtle); font-size: 11px; font-style: normal; }
+.client-page-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.client-page-actions button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid var(--color-hairline); border-radius: var(--radius-md); background: transparent; color: var(--color-ink-muted); font: 12.5px var(--font-text); }
+.client-page-actions button:hover:not(:disabled) { background: var(--color-hover); color: var(--color-ink); }
+.client-page-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.client-page-actions .clients-delete { color: var(--color-semantic-danger); border-color: color-mix(in srgb, var(--color-semantic-danger) 40%, var(--color-hairline)); background: transparent; }
+.client-page-icon { width: 30px; justify-content: center; padding: 0 !important; }
+.client-page-icon-on { color: var(--color-semantic-warning) !important; }
+.client-page-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--color-hairline); }
+.client-page-tabs button { position: relative; padding: 9px 14px; color: var(--color-ink-subtle); font: 13px var(--font-text); }
+.client-page-tabs button:hover { color: var(--color-ink); }
+.client-page-tabs button[aria-selected='true'] { color: var(--color-ink); font-weight: 600; }
+.client-page-tabs button[aria-selected='true']::after { content: ''; position: absolute; inset: auto 8px -1px; height: 2px; border-radius: 2px; background: var(--color-primary); }
+.client-page-body { animation: fade-in var(--duration-base) var(--ease-out); }
+.client-page-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-sm); margin-bottom: var(--space-md); }
+.client-page-stats > div { display: flex; flex-direction: column; gap: 2px; padding: var(--space-sm) var(--space-md); border: 1px solid var(--color-hairline); border-radius: var(--radius-lg); background: var(--color-surface-1); }
+.client-page-stats strong { font: 600 18px var(--font-display); }
+.client-page-stats span { color: var(--color-ink-subtle); font-size: 11.5px; }
+.client-page-modules { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--space-sm); }
+.client-page-modules button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border: 1px solid var(--color-hairline); border-radius: var(--radius-pill); color: var(--color-ink-subtle); font-size: 12px; }
+.client-page-modules button:hover { background: var(--color-hover); color: var(--color-ink); }
+.client-page-modules button[aria-pressed='true'] { border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-hairline)); background: var(--color-accent-soft); color: var(--color-ink); }
+.client-page-modules .clients-trash-toggle { margin-left: auto; }

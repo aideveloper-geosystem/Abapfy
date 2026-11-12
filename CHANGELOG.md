@@ -15,6 +15,13 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 - Usuários existentes são migrados para o workspace "Geral" preservando a hierarquia: MASTER vira proprietário, ADMIN vira administrador e os demais viram membros. Os papéis globais (`app_roles`) seguem valendo para catálogos, chaves de IA e notícias.
 - Antes de aplicar a migração 041 o app continua funcionando no modo anterior, sem a tela de workspace.
 
+### Permissões por papel e tela de Clientes
+
+- Matriz por papel no workspace, aplicada por RLS e gatilhos (migração 043): o proprietário faz tudo; o administrador cria e edita, mas não exclui nem move para a lixeira; o membro lê e envia arquivos. Só o proprietário remove pessoas.
+- Clientes podem ser arquivados (proprietário e administrador) e favoritados por usuário.
+- Tela de Clientes reorganizada: catálogo em tabela ou grade com ordenação, chips de filtro, busca, "Nova sessão" por cliente e página do cliente com abas Visão geral, Drive, Projetos e Sessões. Novo cliente em fluxo curto, com módulos e cópia opcional de workbook.
+- A interface mostra o selo do papel e esconde ações sem permissão; o banco recusa mesmo se a interface for contornada.
+
 ### Interface
 
 - Novo visual dark estilo macOS (padrão) e tema claro, ambos por tokens CSS. Os temas SAP Horizon e Quartz foram removidos; preferências salvas viram o tema escuro ou claro equivalente.
@@ -27,7 +34,7 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ### Banco de dados
 
-- Aplicar `041_workspaces.sql` e `042_abapfy_themes.sql` no Supabase, nessa ordem. Ambas podem ser reexecutadas.
+- Aplicar `041_workspaces.sql`, `042_abapfy_themes.sql` e `043_workspace_role_permissions.sql` no Supabase, nessa ordem. Todas podem ser reexecutadas.
 
 ## [1.0.11] - 2026-11-12
 

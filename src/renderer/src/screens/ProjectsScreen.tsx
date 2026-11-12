@@ -5,6 +5,7 @@ import { useChatStore, type ProjectSummary } from '@renderer/store/chatStore'
 import { useAgentsStore } from '@renderer/store/agentsStore'
 import { ProjectKnowledgeModal } from '@renderer/components/ProjectKnowledgeModal'
 import { useClientsStore } from '@renderer/store/clientsStore'
+import { useClientPermissions } from '@renderer/store/workspaceStore'
 import { useAuthStore } from '@renderer/store/authStore'
 import { useAuthorNames } from '@renderer/lib/useAuthorNames'
 import { creatorLabel } from '@renderer/lib/contentOwnership'
@@ -22,6 +23,7 @@ export function ProjectsScreen({
 }: ProjectsScreenProps): JSX.Element {
   const [createOpen, setCreateOpen] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const permissions = useClientPermissions()
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deleteNotice, setDeleteNotice] = useState<string | null>(null)
   const userId = useAuthStore((state) => state.user?.id)
@@ -89,10 +91,12 @@ export function ProjectsScreen({
             Agrupe chats sob um contexto e, opcionalmente, um agente padrão fixo.
           </p>
         </div>
-        <button type="button" className="skills-import-btn" onClick={() => setCreateOpen(true)}>
-          <Plus size={14} strokeWidth={1.75} />
-          Novo projeto
-        </button>
+        {permissions.canEdit && (
+          <button type="button" className="skills-import-btn" onClick={() => setCreateOpen(true)}>
+            <Plus size={14} strokeWidth={1.75} />
+            Novo projeto
+          </button>
+        )}
       </div>
 
       {deleteError && (
@@ -152,7 +156,7 @@ export function ProjectsScreen({
                 >
                   <BookOpen size={13} strokeWidth={1.75} /> Conhecimento
                 </button>
-                <button
+                {permissions.canDelete && <button
                   type="button"
                   className="agent-card-action project-card-delete"
                   aria-label={'Excluir projeto ' + project.name}
@@ -161,7 +165,7 @@ export function ProjectsScreen({
                 >
                   <Trash2 size={13} />
                   {deletingId === project.id ? 'Excluindo…' : 'Excluir projeto'}
-                </button>
+                </button>}
               </div>
             </div>
           ))

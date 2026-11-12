@@ -17,7 +17,14 @@ function setup({ role = 'MASTER', user = { id: 'user-1' }, counts = {}, deleteRe
         },
         insert(row) {
           calls.push(['insert', table, row])
-          return Promise.resolve({ error: insertError })
+          const result = { error: insertError }
+          return Object.assign(Promise.resolve(result), {
+            select: () => ({ single: () => Promise.resolve({ data: { id: 'new-client' }, error: insertError }) })
+          })
+        },
+        update(row) {
+          calls.push(['update', table, row])
+          return query
         },
         delete() {
           calls.push(['delete', table])
@@ -35,7 +42,8 @@ function setup({ role = 'MASTER', user = { id: 'user-1' }, counts = {}, deleteRe
     '@renderer/lib/supabaseClient': { supabase },
     './authStore': { useAuthStore: { getState: () => ({ user, role }) } },
     './workspaceStore': {
-      currentCanManageClients: () => role === 'MASTER' || role === 'ADMIN',
+      // MASTER stands for OWNER, ADMIN for ADMIN; anything else is a member (migration 043 matrix).
+      currentClientPermissions: () => ({ canEdit: role === 'MASTER' || role === 'ADMIN', canDelete: role === 'MASTER' }),
       currentWorkspaceId: () => workspaceId
     }
   })
@@ -76,19 +84,48 @@ test('creating a client surfaces missing sessions and database failures', async 
   assert.equal(rejected.calls.some(([action]) => action === 'load'), false)
 })
 
-for (const role of ['MASTER', 'ADMIN']) {
-  test(`${role} deletes an empty client and removes only its local modules`, async () => {
-    const { store, calls } = setup({ role })
-    await store.getState().deleteClient('client-1')
-    assert.equal(calls.filter(([action]) => action === 'delete').length, 1)
-    assert.deepEqual(store.getState().clients.map(({ id }) => id), ['client-2'])
-    assert.deepEqual(store.getState().modules.map(({ id }) => id), ['module-2'])
-  })
-}
+test('the owner deletes an empty client and removes only its local modules', async () => {
+  const { store, calls } = setup({ role: 'MASTER' })
+  await store.getState().deleteClient('client-1')
+  assert.equal(calls.filter(([action]) => action === 'delete').length, 1)
+  assert.deepEqual(store.getState().clients.map(({ id }) => id), ['client-2'])
+  assert.deepEqual(store.getState().modules.map(({ id }) => id), ['module-2'])
+})
+
+test('admins cannot delete clients, they archive instead', async () => {
+  const { store, calls } = setup({ role: 'ADMIN' })
+  await assert.rejects(store.getState().deleteClient('client-1'), /Somente o proprietário/)
+  assert.equal(calls.some(([action]) => action === 'delete'), false)
+  await store.getState().archiveClient({ id: 'client-1' }, true)
+  const update = calls.find(([action]) => action === 'update')
+  assert.equal(update[1], 'clients')
+  assert.ok(update[2].archived_at)
+  assert.equal(update[2].updated_by, 'user-1')
+  await store.getState().archiveClient({ id: 'client-1' }, false)
+  assert.equal(calls.filter(([action]) => action === 'update').at(-1)[2].archived_at, null)
+})
+
+test('members cannot create or archive clients', async () => {
+  const { store, calls } = setup({ role: null })
+  await assert.rejects(store.getState().createClient('Cliente', ''), /proprietários e administradores/)
+  await assert.rejects(store.getState().archiveClient({ id: 'client-1' }, true), /proprietários e administradores/)
+  assert.equal(calls.length, 0)
+})
+
+test('a new client can get extra modules and copy another client workbook', async () => {
+  const { store, calls } = setup({ role: 'ADMIN' })
+  store.setState({ clients: [{ id: 'client-1', workbookMd: '# regras' }] })
+  const id = await store.getState().createClient('Novo', '', { extraModules: ['MM', ' Programas ', 'mm', ''], workbookFrom: 'client-1' })
+  assert.equal(id, 'new-client')
+  const inserts = calls.filter(([action]) => action === 'insert')
+  assert.equal(inserts[0][2].workbook_md, '# regras')
+  // default modules (Programas, EFs, DTECs) come from the database seed; only MM is extra and added once
+  assert.deepEqual(inserts.slice(1).map(([, table, row]) => [table, row.name]), [['client_modules', 'MM']])
+})
 
 test('users without management permission cannot issue a delete', async () => {
   const { store, calls } = setup({ role: null })
-  await assert.rejects(store.getState().deleteClient('client-1'), /proprietários e administradores/)
+  await assert.rejects(store.getState().deleteClient('client-1'), /Somente o proprietário/)
   assert.equal(calls.length, 0)
 })
 

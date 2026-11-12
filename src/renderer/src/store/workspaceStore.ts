@@ -2,6 +2,9 @@ import { create } from 'zustand'
 import { supabase } from '@renderer/lib/supabaseClient'
 import {
   canManageClients,
+  clientPermissions,
+  effectiveRole,
+  type ClientPermissions,
   isWorkspaceAdmin,
   isWorkspaceRole,
   normalizeJoinCode,
@@ -249,6 +252,19 @@ export function useCanManageClients(): boolean {
   const legacy = useWorkspaceStore((state) => state.legacy)
   const workspaceRole = useWorkspaceStore((state) => state.workspace?.role ?? null)
   return canManageClients(workspaceRole, role, legacy)
+}
+
+/** Permissions of the signed-in user on workspace content (clients, modules, projects, drive). */
+export function useClientPermissions(): ClientPermissions {
+  const role = useAuthStore((state) => state.role)
+  const legacy = useWorkspaceStore((state) => state.legacy)
+  const workspaceRole = useWorkspaceStore((state) => state.workspace?.role ?? null)
+  return clientPermissions(effectiveRole(workspaceRole, role, legacy))
+}
+
+export function currentClientPermissions(): ClientPermissions {
+  const { legacy, workspace } = useWorkspaceStore.getState()
+  return clientPermissions(effectiveRole(workspace?.role ?? null, useAuthStore.getState().role, legacy))
 }
 
 export function currentCanManageClients(): boolean {
