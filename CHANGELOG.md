@@ -6,6 +6,8 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-12
+
 ### Workspaces e papéis
 
 - Novo conceito de workspace: reúne pessoas, clientes e o drive compartilhado. Papéis: proprietário, administrador e membro.
@@ -35,6 +37,10 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 ### Banco de dados
 
 - Aplicar `041_workspaces.sql`, `042_abapfy_themes.sql` e `043_workspace_role_permissions.sql` no Supabase, nessa ordem. Todas podem ser reexecutadas.
+
+### Banco de dados
+
+- Aplicar no Supabase, nesta ordem: `041_workspaces.sql`, `042_abapfy_themes.sql` e `043_workspace_role_permissions.sql`. Versões anteriores do aplicativo perdem a gravação de tema e contas novas só enxergam dados depois de entrar em um workspace; atualize o aplicativo antes de cadastrar novos usuários.
 
 ## [1.0.11] - 2026-11-12
 
