@@ -1084,14 +1084,14 @@
 .home-composer-toolbar .home-composer-spacer { flex: 1 1 8px; min-width: 8px; }
 
 /* Tier 1: below ~900px the low-priority chips (flow, SAP, context) keep only their icon. */
-@container (max-width: 900px) {
+@container (max-width: 740px) {
   .home-composer-toolbar .composer-chip-low { padding: 0 9px; }
   .home-composer-toolbar .composer-chip-low .composer-chip-label,
   .home-composer-toolbar .composer-chip-low .composer-chip-caret,
   .home-composer-toolbar .composer-chip-low-label { display: none; }
 }
 /* Tier 2: below ~560px everything but the model and send collapses to icons. */
-@container (max-width: 560px) {
+@container (max-width: 500px) {
   .home-composer-toolbar .composer-chip { padding: 0 9px; }
   .home-composer-toolbar .composer-chip .composer-chip-label,
   .home-composer-toolbar .composer-chip .composer-chip-caret { display: none; }
@@ -1099,3 +1099,16 @@
 @container (max-width: 420px) {
   .home-composer-toolbar .home-model-trigger > span { display: none; }
 }
+
+/* ---- Round 4: balanced size. Wide enough for readable chips, not a billboard ---- */
+.home-composer,
+.home-main-empty .home-welcome { max-width: 860px; }
+.home-composer-card { padding: 14px 16px 10px; gap: 8px; }
+.home-composer-card .home-composer-input { min-height: 68px; font-size: 14.5px; }
+.home-main:not(.home-main-empty) .home-composer-card .home-composer-input { min-height: 48px; }
+.home-composer-card .home-composer-toolbar { gap: 8px; padding-top: 2px; }
+.home-composer-toolbar .composer-chip,
+.home-composer-toolbar .home-model-trigger,
+.home-composer-toolbar .context-meter > summary { height: 28px; padding: 0 10px; }
+.home-composer-toolbar .home-composer-icon-btn { width: 28px; height: 28px; }
+.home-composer-toolbar .home-composer-send { width: 30px; height: 30px; }
