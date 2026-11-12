@@ -160,4 +160,34 @@ do $$ begin
   reset role;
 end $$;
 
+-- Members: only the owner removes people; anyone can leave.
+do $$ declare w uuid := '90000000-0000-0000-0000-000000000043'; begin
+  perform public.act('00000000-0000-0000-0000-0000000000a2');
+  perform public.expect_error(format($q$select public.remove_workspace_member(%L, '00000000-0000-0000-0000-0000000000a3')$q$, w), '%Only the owner can remove members%');
+  reset role;
+  perform public.act('00000000-0000-0000-0000-0000000000a1');
+  assert public.remove_workspace_member(w, '00000000-0000-0000-0000-0000000000a3') = true, 'owner removes member';
+  reset role;
+  insert into public.workspace_members(workspace_id, user_id, role) values (w, '00000000-0000-0000-0000-0000000000a3', 'MEMBER');
+  perform public.act('00000000-0000-0000-0000-0000000000a3');
+  assert public.remove_workspace_member(w, '00000000-0000-0000-0000-0000000000a3') = true, 'member leaves';
+  reset role;
+end $$;
+
+-- Server-derived fields: archive author cannot be forged, files cannot start trashed or change path.
+do $$ declare a uuid := '00000000-0000-0000-0000-0000000000a2'; begin
+  perform public.act(a);
+  update public.clients set archived_at = now(), archived_by = '00000000-0000-0000-0000-0000000000a1', updated_by = a
+    where id = 'b0000000-0000-0000-0000-000000000043';
+  update public.clients set description = 'again', archived_by = '00000000-0000-0000-0000-0000000000a1', updated_by = a
+    where id = 'b0000000-0000-0000-0000-000000000043';
+  insert into public.client_files(id, client_id, module_id, name, storage_path, user_id, deleted_at, deleted_by)
+    values ('e0000000-0000-0000-0000-000000000009', 'b0000000-0000-0000-0000-000000000043', 'c0000000-0000-0000-0000-000000000043', 'sneaky',
+            'b0000000-0000-0000-0000-000000000043/c0000000-0000-0000-0000-000000000043/sneaky', a, now(), a);
+  perform public.expect_error($q$update public.client_files set storage_path = 'elsewhere' where id = 'e0000000-0000-0000-0000-000000000009'$q$, '%storage path of a file cannot be changed%');
+  reset role;
+  assert (select archived_by from public.clients where id = 'b0000000-0000-0000-0000-000000000043') = a, 'archived_by stays the real actor';
+  assert (select deleted_at from public.client_files where id = 'e0000000-0000-0000-0000-000000000009') is null, 'inserted file is not trashed';
+end $$;
+
 select 'workspaces 043 sql ok' as result;
