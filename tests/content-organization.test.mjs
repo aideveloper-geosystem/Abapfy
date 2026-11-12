@@ -85,14 +85,22 @@ test('sidebar renders personal chats by default with real author/client metadata
   const { Sidebar } = loadTs('src/renderer/src/components/Sidebar.tsx', {
     'react-router-dom': { useNavigate:()=>()=>{} }, '@renderer/store/authStore': { useAuthStore:store({ user:{id:'me'},profile:{nome:'Paulo Oliveira'},signOut:async()=>{} }) },
     '@renderer/store/chatStore': { useChatStore:store(state) }, '@renderer/store/clientsStore': { useClientsStore:store({clients:[{id:'client-1',name:'Supergasbras'}]}) },
-    '@renderer/store/chatRuntimeStore':{useChatRuntimeStore:store({runtimes:{}})}, '@renderer/lib/workPresence':{presenceLabel:()=>null}, '@renderer/components/UsageModal':{UsageModal:()=>null},
+    '@renderer/store/chatRuntimeStore':{useChatRuntimeStore:store({runtimes:{}})}, '@renderer/lib/workPresence':{presenceLabel:()=>null}, '@renderer/components/UsageModal':{UsageModal:()=>null}, '@renderer/components/SearchModal':{SearchModal:()=>null},
+    '@renderer/store/workspaceStore':{useWorkspaceStore:store({workspace:{id:'w',name:'Geral',role:'MEMBER'},legacy:false})},
     '@renderer/lib/useAuthorNames':{useAuthorNames:()=>({me:'Paulo Oliveira',other:'Carlos Mota'})}, '@renderer/lib/contentOwnership':ownership, './Sidebar.css':{}
   })
   const html = renderToStaticMarkup(createElement(Sidebar,{workPresence:[],activeView:'chat',activeChatId:null}))
   assert.match(html,/Meu código ABAP/)
   assert.doesNotMatch(html,/Código de outro usuário/)
   assert.match(html.replace(/<[^>]*>/g, ''),/Você · Supergasbras/)
-  assert.match(html,/Autoria dos chats recentes/)
-  assert.match(html,/Meus chats/)
+  assert.match(html,/Autoria das sessões/)
+  assert.match(html,/Minhas/)
   assert.match(html,/Equipe/)
+  // Sessions are grouped by client, and the primary navigation follows the new order.
+  assert.match(html,/sidebar-client-header/)
+  const nav = html.replace(/<[^>]*>/g, ' ')
+  for (const label of ['Nova sessão','Pesquisa','Projetos','Clientes','Fluxos'])
+    assert.match(nav, new RegExp(label))
+  assert.ok(nav.indexOf('Nova sessão') < nav.indexOf('Pesquisa') && nav.indexOf('Pesquisa') < nav.indexOf('Projetos'))
+  assert.match(html,/>Geral</)
 })

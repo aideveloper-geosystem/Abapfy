@@ -9,6 +9,9 @@ interface SessionContextPanelProps {
   skills: string[]
   mcps: string[]
   environment: string
+  clientName: string | null
+  moduleName: string | null
+  projectName: string | null
   sapConnection: SapAdtConnectionView | null
   usage: ContextUsageRow[]
   budget: number
@@ -38,6 +41,9 @@ export function SessionContextPanel({
   skills,
   mcps,
   environment,
+  clientName,
+  moduleName,
+  projectName,
   sapConnection,
   usage,
   budget,
@@ -67,6 +73,37 @@ export function SessionContextPanel({
           <X size={15} />
         </button>
       </header>
+      <details className="session-context-card" open>
+        <summary>
+          <span className="session-context-card-title">
+            Sessão <ChevronRight size={13} />
+          </span>
+          <span className="session-context-card-value" title={environment}>
+            {clientName ?? 'Sem cliente'}
+          </span>
+        </summary>
+        <div className="session-context-card-body">
+          <dl className="session-context-metadata">
+            <div>
+              <dt>Cliente</dt>
+              <dd>{clientName ?? 'Nenhum cliente selecionado'}</dd>
+            </div>
+            <div>
+              <dt>Módulo</dt>
+              <dd>{moduleName ?? '—'}</dd>
+            </div>
+            <div>
+              <dt>Projeto</dt>
+              <dd>{projectName ?? 'Sem projeto específico'}</dd>
+            </div>
+            <div>
+              <dt>Agente</dt>
+              <dd>{agentName ?? 'Seleção automática pendente'}</dd>
+            </div>
+          </dl>
+          <p>O drive do cliente é compartilhado no workspace e pode ser usado pelo agente.</p>
+        </div>
+      </details>
       <details className="session-context-card">
         <summary>
           <span className="session-context-card-title">
@@ -252,7 +289,7 @@ export function SessionContextPanel({
           <span className="session-context-card-title">
             Conectores <ChevronRight size={13} />
           </span>
-          <span className="session-context-card-value">Em uso: {connectors.length}</span>
+          <span className="session-context-card-value">Em uso: {connectors.length + mcps.length}</span>
         </summary>
         <div className="session-context-card-body">
           {connectors.length ? (
@@ -269,6 +306,17 @@ export function SessionContextPanel({
             <p>Nenhuma skill carregada nesta sessão.</p>
           )}
           <p>Skills incluídas nas instruções desta conversa.</p>
+          {mcps.length > 0 && (
+            <ul className="session-context-connectors">
+              {mcps.map((mcp) => (
+                <li key={mcp}>
+                  <Plug size={15} />
+                  <span>{mcp}</span>
+                  <span className="session-context-status">MCP</span>
+                </li>
+              ))}
+            </ul>
+          )}
           {agentName && (
             <div className="session-context-resource">
               <Bot size={14} />

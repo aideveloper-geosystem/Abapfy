@@ -50,6 +50,7 @@ import { buildTaskExecutionPrompt } from '@renderer/lib/taskAssistant'
 import { FlowsScreen } from '@renderer/screens/FlowsScreen'
 import { TasksScreen } from '@renderer/screens/TasksScreen'
 import { SessionContextPanel } from '@renderer/components/SessionContextPanel'
+import { WorkspaceScreen } from '@renderer/screens/WorkspaceScreen'
 import { AiLoadingState } from '@renderer/components/AiMessageActions'
 import { SapConnectionSelector, type SapSelection } from '@renderer/components/SapConnectionSelector'
 import { PROMPT_SHORTCUTS, PromptStarters } from '@renderer/components/PromptShortcuts'
@@ -138,14 +139,14 @@ interface ActiveAgent {
 
 interface TaskLaunch { id: string; userId: string; taskId: string; subtaskId: string | null; prompt: string }
 
-type View = 'chat' | 'skills' | 'agents' | 'projects' | 'clients' | 'tasks' | 'news' | 'flows'
+type View = 'chat' | 'skills' | 'agents' | 'projects' | 'clients' | 'tasks' | 'news' | 'flows' | 'workspace'
 
 export function HomeScreen(): JSX.Element {
   const [taskLaunch, setTaskLaunch] = useState<TaskLaunch | null>(null)
   const consumedTaskLaunch = useRef<string | null>(null)
   const [view, setView] = useState<View>('chat')
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsSection, setSettingsSection] = useState<'mcp' | 'flows' | undefined>()
+  const [settingsSection, setSettingsSection] = useState<'mcp' | 'flows' | 'general' | 'updates' | undefined>()
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [modelChoiceError, setModelChoiceError] = useState<string | null>(null)
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
@@ -157,7 +158,21 @@ export function HomeScreen(): JSX.Element {
   const [folderNotice, setFolderNotice] = useState<string | null>(null)
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
   const [driveActivity, setDriveActivity] = useState<WorkScope | null>(null)
-  const [sessionPanelOpen, setSessionPanelOpen] = useState(false)
+  // The context panel is docked on the right (like the Claude desktop app) and remembers its state.
+  const [sessionPanelOpen, setSessionPanelOpenState] = useState<boolean>(() => {
+    try {
+      const saved = window.localStorage.getItem('abapfy.contextPanelOpen')
+      if (saved !== null) return saved === '1'
+    } catch { /* storage may be unavailable */ }
+    return window.innerWidth >= 1280
+  })
+  const setSessionPanelOpen = (next: boolean | ((open: boolean) => boolean)): void => {
+    setSessionPanelOpenState((current) => {
+      const value = typeof next === 'function' ? next(current) : next
+      try { window.localStorage.setItem('abapfy.contextPanelOpen', value ? '1' : '0') } catch { /* ignore */ }
+      return value
+    })
+  }
   const [input, setInput] = useState('')
   const [shortcutsDismissed, setShortcutsDismissed] = useState(false)
   const [shortcutIndex, setShortcutIndex] = useState(0)
@@ -1370,7 +1385,8 @@ export function HomeScreen(): JSX.Element {
         activeView={view}
         activeChatId={currentChatId}
         onNewSession={handleNewSession}
-        onOpenSettings={() => { setSettingsSection(undefined); setSettingsOpen(true) }}
+        onOpenSettings={(section) => { setSettingsSection(section); setSettingsOpen(true) }}
+        onOpenWorkspace={() => setView('workspace')}
         onOpenSkills={() => setView('skills')}
         onOpenAgents={() => setView('agents')}
         onOpenFlows={() => setView('flows')}
@@ -1393,10 +1409,11 @@ export function HomeScreen(): JSX.Element {
       {view === 'flows' && <FlowsScreen />}
       {view === 'tasks' && <TasksScreen onStartTask={handleStartTask} onOpenChat={(id) => { void handleSelectChat(id) }} />}
       {view === 'news' && <NewsScreen />}
+      {view === 'workspace' && <WorkspaceScreen />}
 
       {view === 'chat' && (
-        <div className="home-main">
-          <button
+        <div className={`home-main ${sessionPanelOpen ? 'home-main-with-panel' : ''}`}>
+          {!sessionPanelOpen && <button
             type="button"
             className={`home-session-context-trigger ${sessionPanelOpen ? 'home-session-context-trigger-active' : ''}`}
             title="Contexto da sessão"
@@ -1410,7 +1427,7 @@ export function HomeScreen(): JSX.Element {
                 {sessionFiles.length + sessionSkillNames.length + sessionMcps.length}
               </span>
             )}
-          </button>
+          </button>}
           {sessionPanelOpen && (
             <SessionContextPanel
               agentName={activeAgent?.name ?? selectedAgent?.name ?? null}
@@ -1418,6 +1435,9 @@ export function HomeScreen(): JSX.Element {
               skills={sessionSkillNames}
               mcps={sessionMcps}
               environment={selectedClient ? `${selectedClient.name} / ${selectedModule?.name ?? 'Módulo'}` : 'Nenhum cliente selecionado'}
+              clientName={selectedClient?.name ?? null}
+              moduleName={selectedModule?.name ?? null}
+              projectName={currentProject?.name ?? null}
               sapConnection={sapSelection?.userId === user?.id && sapSelection?.connectionId === sapConnectionView?.id ? sapConnectionView : null}
               usage={contextRows}
               budget={compactionSettings.inputBudget}

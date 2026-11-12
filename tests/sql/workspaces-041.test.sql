@@ -117,6 +117,14 @@ do $$ declare n uuid := '00000000-0000-0000-0000-00000000000f'; code text; req u
   reset role;
 end $$;
 
+-- 5b. Join code is not readable by plain members, even straight from the table.
+do $$ begin
+  perform public.act('00000000-0000-0000-0000-00000000000c');
+  perform public.expect_error('select join_code from public.workspaces', '%permission denied%');
+  assert (select join_code from public.my_workspace()) is null, 'my_workspace hides the code from members';
+  reset role;
+end $$;
+
 -- 6. Roles: only owner changes roles; last owner is protected; removal rules.
 do $$ declare g uuid := (select id from public.t_geral); begin
   perform public.act('00000000-0000-0000-0000-00000000000b');

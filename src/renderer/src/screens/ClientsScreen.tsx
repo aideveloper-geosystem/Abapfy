@@ -6,6 +6,7 @@ import { BookOpen, ChevronRight, FileText, Folder, FolderInput, FolderPlus, Mess
 import { supabase } from '@renderer/lib/supabaseClient'
 import { extractTextFromFile } from '@renderer/lib/attachments'
 import { useAuthStore } from '@renderer/store/authStore'
+import { useCanManageClients } from '@renderer/store/workspaceStore'
 import { useClientsStore, type Client } from '@renderer/store/clientsStore'
 import { loadModuleChatPage, useChatStore, type ChatSummary } from '@renderer/store/chatStore'
 import { ProjectKnowledgeModal } from '@renderer/components/ProjectKnowledgeModal'
@@ -37,8 +38,8 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
   const { clients, modules, error, load, createClient, deleteClient, updateClient, createModule, updateModule } =
     useClientsStore()
   const projects = useChatStore(state => state.projects)
-  const { role, user } = useAuthStore()
-  const canManage = role === 'MASTER' || role === 'ADMIN'
+  const { user } = useAuthStore()
+  const canManage = useCanManageClients()
   const [clientId, setClientId] = useState<string | null>(null)
   const [moduleId, setModuleId] = useState<string | null>(null)
   const [files, setFiles] = useState<ClientFileRecord[]>([])

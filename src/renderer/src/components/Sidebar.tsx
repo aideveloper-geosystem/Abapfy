@@ -4,6 +4,7 @@ import {
   Archive,
   ArrowLeft,
   Bot,
+  ChevronDown,
   ChevronRight,
   Building2,
   ChevronsUpDown,
@@ -16,43 +17,55 @@ import {
   Newspaper,
   PanelLeftClose,
   PanelLeftOpen,
+  ScrollText,
   Search,
   Settings,
   Sparkles,
   SquarePen,
   Trash2,
+  Users,
   Workflow
 } from 'lucide-react'
 import { useAuthStore } from '@renderer/store/authStore'
+import { useWorkspaceStore } from '@renderer/store/workspaceStore'
+import { SearchModal } from '@renderer/components/SearchModal'
 import { useChatStore, type ChatSummary, type ProjectSummary } from '@renderer/store/chatStore'
 import { useChatRuntimeStore } from '@renderer/store/chatRuntimeStore'
 import { presenceLabel, type WorkPresence } from '@renderer/lib/workPresence'
 import { UsageModal } from '@renderer/components/UsageModal'
 import { useClientsStore } from '@renderer/store/clientsStore'
 import { useAuthorNames } from '@renderer/lib/useAuthorNames'
-import { creatorLabel, matchesContent, matchesOwner, contentDate, type OwnerFilter } from '@renderer/lib/contentOwnership'
+import { creatorLabel, matchesOwner, contentDate, type OwnerFilter } from '@renderer/lib/contentOwnership'
 import './Sidebar.css'
 
-type ShortcutId = 'new-session' | 'projects' | 'clients' | 'tasks' | 'skills' | 'agents' | 'news' | 'flows'
+type ShortcutId = 'new-session' | 'search' | 'projects' | 'clients' | 'flows' | 'tasks' | 'skills' | 'agents' | 'news'
 
+/** Main navigation, in the order users reach for it. */
 const SHORTCUTS: { id: ShortcutId; icon: typeof Sparkles; label: string }[] = [
-  { id: 'new-session', icon: SquarePen, label: 'Nova Sessão' },
+  { id: 'new-session', icon: SquarePen, label: 'Nova sessão' },
+  { id: 'search', icon: Search, label: 'Pesquisa' },
   { id: 'projects', icon: FolderKanban, label: 'Projetos' },
   { id: 'clients', icon: Building2, label: 'Clientes' },
-  { id: 'news', icon: Newspaper, label: 'Notícias' },
-  { id: 'tasks', icon: ListChecks, label: 'Tarefas' },
-  { id: 'skills', icon: Sparkles, label: 'Skills' },
-  { id: 'agents', icon: Bot, label: 'Agentes' },
   { id: 'flows', icon: Workflow, label: 'Fluxos' }
 ]
 
-export type SidebarView = 'chat' | 'skills' | 'agents' | 'projects' | 'clients' | 'tasks' | 'news' | 'flows'
+/** Secondary destinations, collapsed under "Mais". */
+const MORE_SHORTCUTS: { id: ShortcutId; icon: typeof Sparkles; label: string }[] = [
+  { id: 'tasks', icon: ListChecks, label: 'Tarefas' },
+  { id: 'skills', icon: Sparkles, label: 'Skills' },
+  { id: 'agents', icon: Bot, label: 'Agentes' },
+  { id: 'news', icon: Newspaper, label: 'Notícias' }
+]
+
+export type SidebarView = 'chat' | 'skills' | 'agents' | 'projects' | 'clients' | 'tasks' | 'news' | 'flows' | 'workspace'
+export type SettingsTarget = 'general' | 'updates'
 
 interface SidebarProps {
   activeView: SidebarView
   activeChatId: string | null
   onNewSession: () => void
-  onOpenSettings: () => void
+  onOpenSettings: (section?: SettingsTarget) => void
+  onOpenWorkspace: () => void
   onOpenSkills: () => void
   onOpenAgents: () => void
   onOpenFlows: () => void
@@ -230,13 +243,16 @@ export function Sidebar({
   onOpenClients,
   onOpenTasks,
   onOpenNews,
+  onOpenWorkspace,
   onSelectChat,
   onChatRemoved,
   workPresence
 }: SidebarProps): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
-  const [query, setQuery] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const [collapsedClients, setCollapsedClients] = useState<Set<string>>(new Set())
   const [chatScope, setChatScope] = useState<OwnerFilter>('mine')
   const [signOutError, setSignOutError] = useState<string | null>(null)
   const navigate = useNavigate()
@@ -249,6 +265,8 @@ export function Sidebar({
     user: state.user,
     signOut: state.signOut
   }))
+  const workspace = useWorkspaceStore((state) => state.workspace)
+  const workspaceLegacy = useWorkspaceStore((state) => state.legacy)
 
   const {
     recentChats,
@@ -277,11 +295,14 @@ export function Sidebar({
   const names = useAuthorNames([...recentChats.map(chat => chat.userId), ...projects.map(project => project.userId), ...Object.values(projectChats).flat().map(chat => chat.userId)])
   const author = (id: string): string => creatorLabel(id, names, user?.id)
   const clientName = (id: string): string => clients.find(client => client.id === id)?.name ?? ''
-  const searchChat = (chat: ChatSummary): boolean => matchesContent(query, chat.title, author(chat.userId), names[chat.userId], clientName(chat.clientId), chat.agentName)
-  const filteredChats = recentChats.filter(chat => matchesOwner(chat.userId, user?.id, chatScope) && searchChat(chat))
-  const matchesProject = (project: ProjectSummary): boolean => matchesContent(query, project.name, author(project.userId), names[project.userId], clientName(project.clientId))
-  const filteredProjects = projects.filter(project => matchesProject(project) || (projectChats[project.id] ?? []).some(searchChat))
-  useEffect(() => { setChatScope('mine'); setQuery('') }, [user?.id])
+  const filteredChats = recentChats.filter((chat) => matchesOwner(chat.userId, user?.id, chatScope))
+  const filteredProjects = projects
+  // Sessions always live inside a client, so the recent list is grouped by client.
+  const chatGroups = clients
+    .map((client) => ({ client, chats: filteredChats.filter((chat) => chat.clientId === client.id) }))
+    .filter((group) => group.chats.length > 0)
+  const ungrouped = filteredChats.filter((chat) => !clients.some((client) => client.id === chat.clientId))
+  useEffect(() => { setChatScope('mine') }, [user?.id])
   const chatCaption = (chat: ChatSummary): JSX.Element => <span className="sidebar-chat-copy"><span className="sidebar-chat-title">{chat.title}</span><small><span className="sidebar-author-name">{author(chat.userId)}</span>{clientName(chat.clientId) ? ' · ' + clientName(chat.clientId) : ''}</small></span>
   const chatTooltip = (chat: ChatSummary): string => [chat.title, 'Criado por ' + author(chat.userId), clientName(chat.clientId), 'Atualizado em ' + contentDate(chat.updatedAt)].filter(Boolean).join(' · ')
 
@@ -296,6 +317,17 @@ export function Sidebar({
     if (ok && chatId === activeChatId) onChatRemoved?.(chatId)
     return ok
   }
+
+  useEffect(() => {
+    function handleSearchShortcut(event: KeyboardEvent): void {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+    document.addEventListener('keydown', handleSearchShortcut)
+    return () => document.removeEventListener('keydown', handleSearchShortcut)
+  }, [])
 
   useEffect(() => {
     if (!loaded) load()
@@ -330,6 +362,7 @@ export function Sidebar({
   }
 
   function handleShortcutClick(id: ShortcutId): void {
+    if (id === 'search') setSearchOpen(true)
     if (id === 'skills') onOpenSkills()
     if (id === 'agents') onOpenAgents()
     if (id === 'flows') onOpenFlows()
@@ -349,73 +382,132 @@ export function Sidebar({
     if (!projectChats[projectId]) loadProjectChats(projectId)
   }
 
+  function toggleClientGroup(clientId: string): void {
+    setCollapsedClients((current) => {
+      const next = new Set(current)
+      if (next.has(clientId)) next.delete(clientId)
+      else next.add(clientId)
+      return next
+    })
+  }
+
+  function openFromMenu(action: () => void): void {
+    setMenuOpen(false)
+    action()
+  }
+
+  function renderShortcut({ id, icon: Icon, label }: (typeof SHORTCUTS)[number], view?: SidebarView): JSX.Element {
+    const active = view !== undefined && activeView === view
+    return (
+      <button
+        key={id}
+        type="button"
+        className={`sidebar-shortcut ${active ? 'sidebar-shortcut-active' : ''}`}
+        onClick={() => handleShortcutClick(id)}
+        title={label}
+        aria-label={label}
+        aria-current={active ? 'page' : undefined}
+      >
+        <Icon size={16} strokeWidth={1.75} />
+        <span>{label}</span>
+      </button>
+    )
+  }
+
+  function renderChatRow(chat: ChatSummary, sublist = false): JSX.Element {
+    const presenceText = presenceLabel(workPresence.filter((item) => item.chatId === chat.id), user?.id ?? null)
+    return (
+      <li key={chat.id} className={`sidebar-list-row ${sublist ? 'sidebar-sublist-row' : ''}`}>
+        <button
+          type="button"
+          className={`sidebar-list-item sidebar-list-item-btn ${
+            activeView === 'chat' && activeChatId === chat.id ? 'sidebar-list-item-active' : ''
+          }`}
+          title={chatTooltip(chat)}
+          onClick={() => onSelectChat(chat.id)}
+        >
+          {chatCaption(chat)}
+        </button>
+        <div className="sidebar-list-row-end">
+          {presenceText && <span className="sidebar-work-dot" title={presenceText} />}
+          {activeChatId !== chat.id && <ChatStatusDot chatId={chat.id} />}
+          <ChatRowMenu
+            chat={chat}
+            active={activeChatId === chat.id}
+            projects={projects}
+            onSelect={() => onSelectChat(chat.id)}
+            onDelete={() => handleDeleteChat(chat.id)}
+            onArchive={() => handleArchiveChat(chat.id)}
+            onMove={(projectId) => moveChatToProject(chat.id, projectId)}
+          />
+        </div>
+      </li>
+    )
+  }
+
+  const roleLabel = workspace ? { OWNER: 'Proprietário', ADMIN: 'Administrador', MEMBER: 'Membro' }[workspace.role] : null
+
   return (
     <aside className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''}`}>
-      <div className="sidebar-workspace-header"><span>Área de trabalho</span><button type="button" aria-label={collapsed ? 'Expandir navegação' : 'Recolher navegação'} title={collapsed ? 'Expandir navegação' : 'Recolher navegação'} aria-expanded={!collapsed} onClick={() => { setCollapsed((value) => !value); setMenuOpen(false) }}>{collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button></div>
-      <nav className="sidebar-shortcuts">
-        {SHORTCUTS.map(({ id, icon: Icon, label }) => (
-          <button
-            key={id}
-            type="button"
-            className={`sidebar-shortcut ${activeView === id ? 'sidebar-shortcut-active' : ''}`}
-            onClick={() => handleShortcutClick(id)}
-            title={label}
-            aria-label={label}
-            aria-current={activeView === id ? 'page' : undefined}
-          >
-            <Icon size={16} strokeWidth={1.75} />
-            <span>{label}</span>
-          </button>
-        ))}
+      <div className="sidebar-workspace-header">
+        <button
+          type="button"
+          className="sidebar-workspace-name"
+          title={workspaceLegacy ? 'Workspace indisponível' : 'Gerenciar workspace'}
+          disabled={!workspace}
+          onClick={onOpenWorkspace}
+        >
+          <Users size={14} strokeWidth={1.75} />
+          <span>{workspace?.name ?? 'Abapfy'}</span>
+        </button>
+        <button type="button" className="sidebar-collapse-toggle" aria-label={collapsed ? 'Expandir navegação' : 'Recolher navegação'} title={collapsed ? 'Expandir navegação' : 'Recolher navegação'} aria-expanded={!collapsed} onClick={() => { setCollapsed((value) => !value); setMenuOpen(false) }}>{collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button>
+      </div>
+      <nav className="sidebar-shortcuts" aria-label="Navegação principal">
+        {SHORTCUTS.map((shortcut) =>
+          renderShortcut(shortcut, shortcut.id === 'new-session' || shortcut.id === 'search' ? undefined : (shortcut.id as SidebarView))
+        )}
+        <button
+          type="button"
+          className="sidebar-shortcut sidebar-shortcut-more"
+          aria-expanded={moreOpen}
+          title="Mais"
+          onClick={() => setMoreOpen((open) => !open)}
+        >
+          <ChevronDown size={16} strokeWidth={1.75} className={`sidebar-more-chevron ${moreOpen ? 'sidebar-more-chevron-open' : ''}`} />
+          <span>Mais</span>
+        </button>
+        {moreOpen && MORE_SHORTCUTS.map((shortcut) => renderShortcut(shortcut, shortcut.id as SidebarView))}
       </nav>
 
       <div className="sidebar-scroll">
-        <label className="sidebar-search"><Search size={13} /><input value={query} title="Busca nos chats recentes e projetos carregados" aria-label="Buscar chats recentes e projetos por nome, autor ou cliente" placeholder="Buscar nome, pessoa ou cliente…" onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setQuery('') }} /></label>
         <div className="sidebar-section">
-          <span className="sidebar-section-title">Chats recentes</span>
-          <div className="sidebar-chat-scopes" role="group" aria-label="Autoria dos chats recentes">
-            {([['mine', 'Meus chats'], ['team', 'Equipe'], ['all', 'Todos']] as const).map(([scope,label]) => <button key={scope} type="button" aria-pressed={chatScope === scope} onClick={() => setChatScope(scope)}>{label}<span>{recentChats.filter(chat => matchesOwner(chat.userId, user?.id, scope) && searchChat(chat)).length}</span></button>)}
+          <span className="sidebar-section-title">Sessões</span>
+          <div className="sidebar-chat-scopes" role="group" aria-label="Autoria das sessões">
+            {([['mine', 'Minhas'], ['team', 'Equipe'], ['all', 'Todas']] as const).map(([scope, label]) => <button key={scope} type="button" aria-pressed={chatScope === scope} onClick={() => setChatScope(scope)}>{label}<span>{recentChats.filter((chat) => matchesOwner(chat.userId, user?.id, scope)).length}</span></button>)}
           </div>
-          <small className="sidebar-scope-note">Sem projeto · conteúdo compartilhado</small>
-          {chatLoadError && <div className="sidebar-load-error" role="alert">Não foi possível atualizar os chats.<button type="button" onClick={() => void load()}>Tentar novamente</button></div>}
-          <ul className="sidebar-list">
-            {filteredChats.length === 0 && <li className="sidebar-list-empty">{query ? 'Nenhum chat neste filtro.' : chatScope === 'mine' ? 'Você ainda não tem chats recentes.' : 'Nenhum chat recente neste grupo.'}</li>}
-            {filteredChats.map((chat) => (
-              <li key={chat.id} className="sidebar-list-row">
-                <button
-                  type="button"
-                  className={`sidebar-list-item sidebar-list-item-btn ${
-                    activeView === 'chat' && activeChatId === chat.id
-                      ? 'sidebar-list-item-active'
-                      : ''
-                  }`}
-                  title={chatTooltip(chat)}
-                  onClick={() => onSelectChat(chat.id)}
-                >
-                  {chatCaption(chat)}
+          {chatLoadError && <div className="sidebar-load-error" role="alert">Não foi possível atualizar as sessões.<button type="button" onClick={() => void load()}>Tentar novamente</button></div>}
+          {filteredChats.length === 0 && <p className="sidebar-list-empty">{chatScope === 'mine' ? 'Você ainda não tem sessões.' : 'Nenhuma sessão neste grupo.'}</p>}
+          {chatGroups.map(({ client, chats }) => {
+            const open = !collapsedClients.has(client.id)
+            return (
+              <div key={client.id} className="sidebar-client-group">
+                <button type="button" className="sidebar-client-header" aria-expanded={open} onClick={() => toggleClientGroup(client.id)}>
+                  <ChevronRight size={12} strokeWidth={2} className={`sidebar-project-chevron ${open ? 'sidebar-project-chevron-open' : ''}`} />
+                  <Building2 size={13} strokeWidth={1.75} />
+                  <span>{client.name}</span>
+                  <small>{chats.length}</small>
                 </button>
-                <div className="sidebar-list-row-end">
-                  {presenceLabel(workPresence.filter((item) => item.chatId === chat.id), user?.id ?? null) && <span className="sidebar-work-dot" title={presenceLabel(workPresence.filter((item) => item.chatId === chat.id), user?.id ?? null) ?? ''} />}
-                  {activeChatId !== chat.id && <ChatStatusDot chatId={chat.id} />}
-                  <ChatRowMenu
-                    chat={chat}
-                    active={activeChatId === chat.id}
-                    projects={projects}
-                    onSelect={() => onSelectChat(chat.id)}
-                    onDelete={() => handleDeleteChat(chat.id)}
-                    onArchive={() => handleArchiveChat(chat.id)}
-                    onMove={(projectId) => moveChatToProject(chat.id, projectId)}
-                  />
-                </div>
-              </li>
-            ))}
-          </ul>
+                {open && <ul className="sidebar-list">{chats.map((chat) => renderChatRow(chat))}</ul>}
+              </div>
+            )
+          })}
+          {ungrouped.length > 0 && <ul className="sidebar-list">{ungrouped.map((chat) => renderChatRow(chat))}</ul>}
         </div>
 
         <div className="sidebar-section">
           <span className="sidebar-section-title">Projetos</span>
           <ul className="sidebar-list">
-            {filteredProjects.length === 0 && <li className="sidebar-list-empty">{query ? 'Nenhum projeto encontrado.' : 'Nenhum projeto ainda'}</li>}
+            {filteredProjects.length === 0 && <li className="sidebar-list-empty">Nenhum projeto ainda</li>}
             {filteredProjects.map((project) => (
               <li key={project.id}>
                 <button
@@ -431,41 +523,21 @@ export function Sidebar({
                       expandedProject === project.id ? 'sidebar-project-chevron-open' : ''
                     }`}
                   />
-                  <span className="sidebar-chat-copy"><span className="sidebar-chat-title">{project.name}</span><small><span className="sidebar-author-name">{author(project.userId)}</span></small></span>
+                  <span className="sidebar-chat-copy"><span className="sidebar-chat-title">{project.name}</span><small><span className="sidebar-author-name">{author(project.userId)}</span>{clientName(project.clientId) ? ' · ' + clientName(project.clientId) : ''}</small></span>
                 </button>
-                {(expandedProject === project.id || Boolean(query.trim())) && (
+                {expandedProject === project.id && (
                   <ul className="sidebar-sublist">
                     {(projectChats[project.id] ?? []).length === 0 && (
-                      <li className="sidebar-list-empty sidebar-sublist-empty">Sem chats ainda</li>
+                      <li className="sidebar-list-empty sidebar-sublist-empty">Sem sessões ainda</li>
                     )}
-                    {(['mine', 'team'] as const).filter(scope => (projectChats[project.id] ?? []).some(chat => matchesOwner(chat.userId, user?.id, scope))).map(scope => <li key={scope} className="sidebar-project-chat-group"><span className="sidebar-section-title">{scope === 'mine' ? 'Meus chats' : 'Equipe'}</span><ul>
-                    {(projectChats[project.id] ?? []).filter(chat => matchesOwner(chat.userId, user?.id, scope) && (matchesProject(project) || searchChat(chat))).map((chat) => (
-                      <li key={chat.id} className="sidebar-list-row sidebar-sublist-row">
-                        <button
-                          type="button"
-                          className={`sidebar-list-item sidebar-list-item-btn ${
-                            activeView === 'chat' && activeChatId === chat.id
-                              ? 'sidebar-list-item-active'
-                              : ''
-                          }`}
-                          title={chatTooltip(chat)}
-                          onClick={() => onSelectChat(chat.id)}
-                        >
-                          {chatCaption(chat)}
-                        </button>
-                        {presenceLabel(workPresence.filter((item) => item.chatId === chat.id), user?.id ?? null) && <span className="sidebar-work-dot" title={presenceLabel(workPresence.filter((item) => item.chatId === chat.id), user?.id ?? null) ?? ''} />}
-                        <ChatRowMenu
-                          chat={chat}
-                          active={activeChatId === chat.id}
-                          projects={projects}
-                          onSelect={() => onSelectChat(chat.id)}
-                          onDelete={() => handleDeleteChat(chat.id)}
-                          onArchive={() => handleArchiveChat(chat.id)}
-                          onMove={(projectId) => moveChatToProject(chat.id, projectId)}
-                        />
+                    {(['mine', 'team'] as const).filter((scope) => (projectChats[project.id] ?? []).some((chat) => matchesOwner(chat.userId, user?.id, scope))).map((scope) => (
+                      <li key={scope} className="sidebar-project-chat-group">
+                        <span className="sidebar-section-title">{scope === 'mine' ? 'Minhas' : 'Equipe'}</span>
+                        <ul>
+                          {(projectChats[project.id] ?? []).filter((chat) => matchesOwner(chat.userId, user?.id, scope)).map((chat) => renderChatRow(chat, true))}
+                        </ul>
                       </li>
                     ))}
-                    </ul></li>)}
                   </ul>
                 )}
               </li>
@@ -476,34 +548,29 @@ export function Sidebar({
 
       <div className="sidebar-user" ref={menuRef}>
         {menuOpen && (
-          <div className="sidebar-user-menu">
-            <button
-              type="button"
-              className="sidebar-user-menu-item"
-              onClick={() => {
-                setMenuOpen(false)
-                onOpenSettings()
-              }}
-            >
+          <div className="sidebar-user-menu" role="menu">
+            <div className="sidebar-user-menu-head">
+              <strong>{user?.email ?? displayName}</strong>
+              {workspace && <small>{workspace.name}{roleLabel ? ` · ${roleLabel}` : ''}</small>}
+            </div>
+            <button type="button" role="menuitem" className="sidebar-user-menu-item" onClick={() => openFromMenu(() => onOpenSettings('general'))}>
               <Settings size={15} strokeWidth={1.75} />
               Configurações
             </button>
-            <button
-              type="button"
-              className="sidebar-user-menu-item"
-              onClick={() => {
-                setMenuOpen(false)
-                setUsageOpen(true)
-              }}
-            >
+            <button type="button" role="menuitem" className="sidebar-user-menu-item" onClick={() => openFromMenu(() => setUsageOpen(true))}>
               <Gauge size={15} strokeWidth={1.75} />
               Uso
             </button>
-            <button
-              type="button"
-              className="sidebar-user-menu-item sidebar-user-menu-item-danger"
-              onClick={handleSignOut}
-            >
+            <button type="button" role="menuitem" className="sidebar-user-menu-item" disabled={!workspace} onClick={() => openFromMenu(onOpenWorkspace)}>
+              <Users size={15} strokeWidth={1.75} />
+              Workspace
+            </button>
+            <button type="button" role="menuitem" className="sidebar-user-menu-item" onClick={() => openFromMenu(() => onOpenSettings('updates'))}>
+              <ScrollText size={15} strokeWidth={1.75} />
+              Changelog
+            </button>
+            <div className="sidebar-user-menu-divider" role="separator" />
+            <button type="button" role="menuitem" className="sidebar-user-menu-item sidebar-user-menu-item-danger" onClick={handleSignOut}>
               <LogOut size={15} strokeWidth={1.75} />
               Sair
             </button>
@@ -518,19 +585,31 @@ export function Sidebar({
           type="button"
           className="sidebar-user-trigger"
           aria-label={`Menu de ${displayName}`}
+          aria-haspopup="menu"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((open) => !open)}
         >
           <span className="sidebar-avatar">{initials || 'A'}</span>
           <span className="sidebar-user-info">
             <span className="sidebar-user-name">{displayName}</span>
-            {profile?.cargo && <span className="sidebar-user-role">{profile.cargo}</span>}
+            {(profile?.cargo || roleLabel) && <span className="sidebar-user-role">{profile?.cargo ?? roleLabel}</span>}
           </span>
           <ChevronsUpDown size={14} strokeWidth={1.75} className="sidebar-user-chevron" />
         </button>
       </div>
 
       <UsageModal open={usageOpen} onClose={() => setUsageOpen(false)} />
+      <SearchModal
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        chats={recentChats}
+        projects={projects}
+        clients={clients}
+        authorName={author}
+        onSelectChat={onSelectChat}
+        onOpenProjects={onOpenProjects}
+        onOpenClients={onOpenClients}
+      />
     </aside>
   )
 }

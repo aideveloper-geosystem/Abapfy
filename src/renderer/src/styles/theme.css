@@ -1,51 +1,62 @@
+/* Design tokens — see DESIGN.md. Defaults mirror the dark theme (abapfy-dark) so the first paint
+   is already correct; src/renderer/src/lib/themes.ts overrides them at runtime for light/dark. */
 :root {
-  /* Colors — see DESIGN.md */
-  --color-primary: #0070f2;
+  /* Colors */
+  --color-primary: #0a84ff;
   --color-on-primary: #ffffff;
-  --color-primary-hover: #0057d2;
-  --color-primary-focus: #0057d2;
+  --color-primary-hover: #409cff;
+  --color-primary-focus: #64d2ff;
 
-  --color-ink: #1d2d3e;
-  --color-ink-muted: #556b82;
-  --color-ink-subtle: #5b738b;
-  --color-ink-tertiary: #758ca4;
+  --color-ink: #f5f5f7;
+  --color-ink-muted: #c7c7cc;
+  --color-ink-subtle: #98989d;
+  --color-ink-tertiary: #8e8e93;
 
-  --color-canvas: #f5f6f7;
-  --color-surface-1: #ffffff;
-  --color-surface-2: #f7f8fa;
-  --color-surface-3: #ebf8ff;
-  --color-surface-4: #e5eaf0;
+  --color-canvas: #1c1c1e;
+  --color-surface-1: #242426;
+  --color-surface-2: #2c2c2e;
+  --color-surface-3: #232a34;
+  --color-surface-4: #3a3a3c;
 
-  --color-hairline: #d9d9d9;
-  --color-hairline-strong: #bcc7d2;
-  --color-hairline-tertiary: #899bad;
+  --color-hairline: #38383a;
+  --color-hairline-strong: #545458;
+  --color-hairline-tertiary: #6e6e73;
 
-  --color-inverse-canvas: #ffffff;
-  --color-inverse-surface-1: #f5f6f6;
-  --color-inverse-surface-2: #f6f7f7;
-  --color-inverse-ink: #000000;
+  --color-inverse-canvas: #f5f5f7;
+  --color-inverse-surface-1: #e5e5ea;
+  --color-inverse-surface-2: #d1d1d6;
+  --color-inverse-ink: #1c1c1e;
 
-  --color-brand-secure: #7a7fad;
-  --color-semantic-success: #188918;
-  --color-semantic-danger: #aa0808;
-  --color-semantic-warning: #e76500;
-  --color-semantic-info: #0070f2;
-  --color-semantic-overlay: rgba(34, 53, 72, 0.42);
-  --shadow-card: 0 0.125rem 0.5rem rgba(34, 53, 72, 0.12);
-  --shadow-popover: 0 0.5rem 1.5rem rgba(34, 53, 72, 0.16);
-  --shadow-modal: 0 1.5rem 3.75rem rgba(34, 53, 72, 0.22);
+  --color-brand-secure: #bf5af2;
+  --color-semantic-success: #32d74b;
+  --color-semantic-danger: #ff6961;
+  --color-semantic-warning: #ffb340;
+  --color-semantic-info: #64d2ff;
+  --color-semantic-overlay: rgba(0, 0, 0, 0.55);
 
-  /* SAP 72 when installed, with neutral platform fallbacks. */
-  --font-display: '72', 'Segoe UI Variable', 'Segoe UI', Arial, sans-serif;
-  --font-text: '72', 'Segoe UI Variable', 'Segoe UI', Arial, sans-serif;
+  /* App chrome */
+  --color-sidebar: #18181a;
+  --color-sidebar-ink: #e5e5ea;
+  --color-panel: #1f1f21;
+  --color-hover: rgba(255, 255, 255, 0.06);
+  --color-selected: rgba(255, 255, 255, 0.1);
+  --color-accent-soft: rgba(10, 132, 255, 0.16);
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-modal: 0 28px 70px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06);
+
+  /* Typography: system UI (San Francisco on macOS, Segoe UI Variable on Windows). */
+  --font-display: -apple-system, 'SF Pro Display', 'Segoe UI Variable Display', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-text: -apple-system, 'SF Pro Text', 'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'SF Mono', 'Cascadia Code', ui-monospace, Menlo, Consolas, monospace;
 
   /* Radii */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  --radius-xs: 5px;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
   --radius-xxl: 24px;
   --radius-pill: 9999px;
 
@@ -59,7 +70,15 @@
   --space-xxl: 48px;
   --space-section: 96px;
 
-  /* Chrome */
+  /* Motion: short, eased, and disabled for reduced-motion users in global.css. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+
+  /* Chrome sizes */
   --titlebar-height: 40px;
+  --sidebar-width: 260px;
+  --context-panel-width: 320px;
   --app-corner-radius: var(--radius-xl);
 }

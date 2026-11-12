@@ -16,6 +16,20 @@
   gap: var(--space-md);
 }
 
+.home-main-with-panel {
+  padding-right: calc(var(--context-panel-width) + var(--space-xl));
+}
+
+@media (max-width: 1100px) {
+  .home-main-with-panel {
+    padding-right: var(--space-xl);
+  }
+
+  .home-main-with-panel .session-context-panel {
+    box-shadow: var(--shadow-popover);
+  }
+}
+
 .home-session-context-trigger {
   position: absolute;
   top: 18px;
@@ -613,7 +627,7 @@
   color: var(--color-ink-tertiary);
 }
 
-.home-model-error { color: #b42318; font-size: 11px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-model-error { color: var(--color-semantic-danger); font-size: 11px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .home-model-menu-empty {
   padding: var(--space-sm);

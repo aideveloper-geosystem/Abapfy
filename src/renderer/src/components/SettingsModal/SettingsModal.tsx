@@ -59,7 +59,7 @@ const SECTIONS: { id: SectionId; label: string; icon: typeof Palette; group: str
 
 interface SettingsModalProps {
   open: boolean
-  initialSection?: 'mcp' | 'flows'
+  initialSection?: 'mcp' | 'flows' | 'general' | 'updates'
   onClose: () => void
   onOpenClients: () => void
   onOpenFlows: () => void

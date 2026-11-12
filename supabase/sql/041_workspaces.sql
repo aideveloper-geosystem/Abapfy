@@ -228,7 +228,10 @@ create policy workspace_join_requests_read on public.workspace_join_requests for
 revoke all on public.workspaces, public.workspace_members, public.workspace_join_requests from anon;
 revoke insert, delete on public.workspaces from authenticated;
 revoke insert, update, delete on public.workspace_members, public.workspace_join_requests from authenticated;
-grant select on public.workspaces, public.workspace_members, public.workspace_join_requests to authenticated;
+grant select on public.workspace_members, public.workspace_join_requests to authenticated;
+-- join_code is deliberately excluded: plain members must not read it. OWNER/ADMIN get it from my_workspace().
+revoke select on public.workspaces from authenticated;
+grant select (id, name, created_by, created_at, updated_at) on public.workspaces to authenticated;
 grant update (name) on public.workspaces to authenticated;
 
 -- ---------------------------------------------------------------- policies: content isolation

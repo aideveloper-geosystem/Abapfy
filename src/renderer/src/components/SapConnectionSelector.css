@@ -40,7 +40,7 @@
   position: absolute;
   bottom: 100%;
   font-size: 11px;
-  color: var(--color-danger, #ef7070);
+  color: var(--color-semantic-danger);
   white-space: nowrap;
 }
 @media (max-width: 650px) {

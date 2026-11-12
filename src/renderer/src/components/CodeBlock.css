@@ -45,7 +45,7 @@
   overflow-x: auto;
 }
 
-/* Prism's dark palette is replaced by theme tokens in every Horizon variant. */
+/* Prism's dark palette is replaced by theme tokens in both themes. */
 .code-block code, .code-block .token { color: var(--color-ink) !important; }
 .code-block .token.comment { color: var(--color-ink-muted) !important; }
 .code-block .token.keyword, .code-block .token.function { color: var(--color-primary) !important; }

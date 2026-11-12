@@ -25,8 +25,9 @@ body {
   font-family: var(--font-text);
   font-size: 14px;
   line-height: 1.5;
-  letter-spacing: -0.05px;
+  letter-spacing: -0.08px;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   overflow: hidden;
   user-select: none;
 }
@@ -88,9 +89,10 @@ input,
 textarea,
 select {
   transition:
-    border-color 120ms ease,
-    background-color 120ms ease,
-    box-shadow 120ms ease;
+    border-color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
 }
 
 button:focus-visible,
@@ -105,4 +107,34 @@ select:focus-visible {
   flex: 1;
   min-height: 0;
   position: relative;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.app-content > * {
+  animation: fade-in var(--duration-base) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.app-loading {
+  height: 100%;
+  background: var(--color-canvas);
 }

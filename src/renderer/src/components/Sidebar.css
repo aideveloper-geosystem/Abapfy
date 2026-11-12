@@ -1,10 +1,11 @@
 .sidebar {
-  width: 260px;
-  min-width: 260px;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--color-surface-1);
+  background: var(--color-sidebar);
+  color: var(--color-sidebar-ink);
   border-right: 1px solid var(--color-hairline);
 }
 
@@ -37,13 +38,13 @@
 }
 
 .sidebar-shortcut:hover {
-  background: var(--color-surface-2);
+  background: var(--color-hover);
   color: var(--color-ink);
 }
 
 .sidebar-shortcut-active {
-  background: var(--color-surface-3);
-  color: var(--color-primary);
+  background: var(--color-selected);
+  color: var(--color-ink);
   font-weight: 600;
 }
 
@@ -96,7 +97,7 @@
 }
 
 .sidebar-list-item:hover {
-  background: var(--color-surface-2);
+  background: var(--color-hover);
   color: var(--color-ink);
 }
 
@@ -207,16 +208,16 @@
   top: calc(100% + 4px);
   right: 0;
   min-width: 190px;
-  background: var(--color-surface-2);
-  border: 1px solid var(--color-hairline-strong);
-  border-radius: var(--radius-md);
-  padding: 4px;
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  padding: 5px;
   display: flex;
   flex-direction: column;
   gap: 1px;
   box-shadow: var(--shadow-popover);
   z-index: 30;
-  animation: sidebar-menu-in 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: sidebar-menu-in var(--duration-base) var(--ease-out);
 }
 
 .chat-row-menu-item {
@@ -311,7 +312,7 @@
 }
 
 .sidebar-user-trigger:hover {
-  background: var(--color-surface-2);
+  background: var(--color-hover);
 }
 
 .sidebar-avatar {
@@ -394,7 +395,7 @@
 }
 
 .sidebar-user-menu-item:hover:not(:disabled) {
-  background: var(--color-surface-3);
+  background: var(--color-accent-soft);
   color: var(--color-ink);
 }
 
@@ -419,7 +420,7 @@
 }
 .sidebar-workspace-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 16px 0; color: var(--color-ink-tertiary); font: 11px var(--font-text); }
 .sidebar-workspace-header button { display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--radius-md); color: var(--color-ink-muted); }
-.sidebar-workspace-header button:hover { background: var(--color-surface-3); color: var(--color-primary); }
+.sidebar-workspace-header button:hover { background: var(--color-hover); color: var(--color-ink); }
 .sidebar-search { display: flex; align-items: center; gap: 6px; padding: 6px 10px; margin: 0 12px; border: 1px solid var(--color-hairline); border-radius: var(--radius-md); background: var(--color-surface-2); color: var(--color-ink-muted); }
 .sidebar-search input { width: 100%; min-width: 0; border: 0; outline: none; background: transparent; color: var(--color-ink); font: 11px var(--font-text); }
 .sidebar-collapsed { width: 64px; min-width: 64px; }
@@ -434,7 +435,7 @@
 
 .sidebar-chat-scopes { display: flex; gap: 3px; padding: 3px; margin: 2px 4px 4px; border: 1px solid var(--color-hairline); border-radius: 9px; background: var(--color-surface-2); }
 .sidebar-chat-scopes button { display: flex; align-items: center; justify-content: center; gap: 4px; flex: 1; padding: 6px 4px; border-radius: 6px; color: var(--color-ink-tertiary); font: 500 11px var(--font-text); white-space: nowrap; }
-.sidebar-chat-scopes button[aria-pressed="true"] { color: var(--color-primary); background: var(--color-surface-3); }
+.sidebar-chat-scopes button[aria-pressed="true"] { color: var(--color-ink); background: var(--color-selected); }
 .sidebar-chat-scopes button span { font-size: 10px; opacity: .8; }
 .sidebar-scope-note { padding: 0 8px 7px; color: var(--color-ink-tertiary); font: 10px var(--font-text); }
 .sidebar-chat-copy { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; padding: 3px 0; }
@@ -446,3 +447,29 @@
 .sidebar-load-error button { display: block; margin-top: 5px; color: var(--color-primary); }
 
 .sidebar-chat-copy .sidebar-author-name { color: var(--color-primary-hover); font-weight: 600; }
+
+/* Workspace header, "Mais" group, client groups and the profile menu head. */
+.sidebar-workspace-header { padding: 12px 12px 0 var(--space-sm); }
+.sidebar-workspace-header .sidebar-workspace-name { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; width: auto; height: 30px; padding: 0 var(--space-xs); border-radius: var(--radius-md); color: var(--color-ink); font: 600 13px var(--font-text); text-align: left; }
+.sidebar-workspace-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-workspace-name:disabled { cursor: default; }
+.sidebar-workspace-name:disabled:hover { background: transparent; }
+.sidebar-shortcut-more { color: var(--color-ink-tertiary); }
+.sidebar-more-chevron { transition: transform var(--duration-base) var(--ease-out); }
+.sidebar-more-chevron-open { transform: rotate(180deg); }
+.sidebar-client-group { display: flex; flex-direction: column; margin-top: 2px; }
+.sidebar-client-header { display: flex; align-items: center; gap: 6px; padding: 5px var(--space-sm); border-radius: var(--radius-md); color: var(--color-ink-subtle); font: 600 12px var(--font-text); text-align: left; }
+.sidebar-client-header:hover { background: var(--color-hover); color: var(--color-ink); }
+.sidebar-client-header span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-client-header small { color: var(--color-ink-tertiary); font-size: 10.5px; font-weight: 500; }
+.sidebar-client-group .sidebar-list { padding-left: 14px; }
+.sidebar-user-menu-head { display: flex; flex-direction: column; gap: 1px; padding: 8px var(--space-sm) 8px; }
+.sidebar-user-menu-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-ink-subtle); font: 500 12px var(--font-text); }
+.sidebar-user-menu-head small { color: var(--color-ink-tertiary); font-size: 11px; }
+.sidebar-user-menu-divider { height: 1px; margin: 4px 6px; background: var(--color-hairline); }
+.sidebar-collapsed .sidebar-workspace-header { padding: 12px 0 0; }
+.sidebar-collapsed .sidebar-workspace-name { display: none; }
+.sidebar-collapsed .sidebar-shortcut-more { display: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .sidebar { transition: width var(--duration-base) var(--ease-out), min-width var(--duration-base) var(--ease-out); }
+}

@@ -81,6 +81,9 @@ const props = {
   skills: [],
   mcps: [],
   environment: 'Farmativa / ABAP',
+  clientName: 'Farmativa',
+  moduleName: 'ABAP',
+  projectName: null,
   sapConnection: null,
   usage: sessionContextUsage(defaults),
   budget: 1000,
@@ -91,9 +94,11 @@ const props = {
   onClose() {}
 }
 
-test('panel exposes three collapsed cards, empty SAP state and local estimate semantics', () => {
+test('panel docks session, environment, context and connector cards with local estimate semantics', () => {
   const html = renderToStaticMarkup(React.createElement(SessionContextPanel, props))
   for (const label of [
+    'Sessão',
+    'Sem projeto específico',
     'Ambiente',
     'Contexto',
     'Conectores',
@@ -103,7 +108,8 @@ test('panel exposes three collapsed cards, empty SAP state and local estimate se
     'orçamento de entrada'
   ])
     assert.ok(html.includes(label), label)
-  assert.ok(!html.includes(' open=""'))
+  // Only the session card (client / module / project) starts expanded.
+  assert.equal(html.split(' open=""').length - 1, 1)
   assert.ok(html.includes('disabled=""'))
 })
 

@@ -21,7 +21,7 @@
 
 O Abapfy reúne conversas com IA, agentes especializados em SAP/ABAP, documentos de referência e tarefas em um aplicativo desktop. O trabalho é organizado por **cliente → módulo → pastas, arquivos e sessões**. Cada sessão pode aproveitar o contexto do cliente, do projeto e da pasta selecionada, sem exigir que os mesmos arquivos sejam anexados novamente.
 
-O aplicativo usa Supabase para autenticação e persistência, oferece provedores OpenAI, Gemini e Claude e integra ferramentas externas por Model Context Protocol (MCP). A interface segue o [sistema visual SAP Fiori Horizon](DESIGN.md).
+O aplicativo usa Supabase para autenticação e persistência, oferece provedores OpenAI, Gemini e Claude e integra ferramentas externas por Model Context Protocol (MCP). A interface segue o [sistema visual Graphite](DESIGN.md), com tema escuro (padrão) e claro, e organiza o trabalho em [workspaces](docs/workspaces-e-nova-interface.md).
 
 ## Recursos principais
 
@@ -44,7 +44,7 @@ O aplicativo usa Supabase para autenticação e persistência, oferece provedore
 | Camada | Tecnologias |
 | --- | --- |
 | Desktop e build | Electron 32, electron-vite, electron-builder |
-| Interface | React 18, TypeScript, React Router, Zustand, tokens SAP Fiori Horizon |
+| Interface | React 18, TypeScript, React Router, Zustand, tokens CSS (temas escuro e claro) |
 | Dados e autenticação | Supabase Auth, PostgreSQL, Row Level Security (RLS), Storage |
 | IA e integrações | OpenAI, Gemini, Claude, SDK Model Context Protocol |
 | Documentos | pdfjs-dist, mammoth, pizzip, Markdown e realce de código |

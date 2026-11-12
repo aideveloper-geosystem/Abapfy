@@ -1,46 +1,53 @@
-# Abapfy Design System — SAP Fiori Horizon
+# Abapfy Design System — Graphite
 
 ## Direção
 
-O Abapfy usa uma linguagem visual inspirada no SAP Fiori Horizon para parecer familiar a
-profissionais SAP sem reproduzir marcas, logos ou componentes proprietários. A experiência é
-desktop, densa e orientada a trabalho: navegação estável, títulos claros, formulários compactos,
-hierarquia por superfícies e estados semânticos inequívocos.
+O Abapfy usa uma linguagem visual sóbria, inspirada em apps desktop de macOS e no app Claude
+Code: sidebar à esquerda, área de trabalho no centro e painel de contexto à direita. A experiência
+é densa e orientada a trabalho: navegação estável, hierarquia por camadas de superfície, bordas
+finas, cantos arredondados e animações curtas. O tema escuro é o padrão.
 
 ## Temas
 
-- `sap-horizon-light` — **Morning Horizon**, tema claro padrão.
-- `sap-horizon-dark` — **Evening Horizon**, tema escuro recomendado para baixa luminosidade.
-- `sap-quartz-light` e `sap-quartz-dark` — alternativas SAP mais compactas.
-- `sap-horizon-hcw` e `sap-horizon-hcb` — alto contraste claro e escuro.
+- `abapfy-dark` — **Escuro**, padrão. Grafite em camadas (`#1c1c1e` a `#3a3a3c`) com azul de sistema.
+- `abapfy-light` — **Claro**. Cinza suave, cartões brancos e o mesmo azul.
 
-Todos os componentes devem consumir somente os tokens de `src/renderer/src/styles/theme.css`.
-Não use uma cor fixa para texto, fundo ou borda. Cores fixas são permitidas apenas como valores
-de configuração de uma label/coluna e sempre devem ter contraste garantido pela superfície.
+Os dois temas definem exatamente os mesmos tokens (há teste para isso). Todos os componentes
+devem consumir somente os tokens de `src/renderer/src/styles/theme.css`; os valores por tema ficam
+em `src/renderer/src/lib/themes.ts`. Não use cor fixa para texto, fundo ou borda. Cores fixas são
+permitidas apenas como valores de configuração de uma label/coluna e sempre com contraste garantido
+pela superfície. Temas antigos (SAP Horizon e Quartz) são convertidos para o equivalente claro ou escuro.
 
 ## Tokens essenciais
 
 - Ação principal: `--color-primary`, `--color-primary-hover`, `--color-on-primary`.
 - Texto: `--color-ink`, `--color-ink-muted`, `--color-ink-subtle`, `--color-ink-tertiary`.
 - Superfícies: `--color-canvas`, `--color-surface-1` até `--color-surface-4`.
+- Chrome do app: `--color-sidebar`, `--color-sidebar-ink`, `--color-panel`.
+- Interação: `--color-hover`, `--color-selected`, `--color-accent-soft`.
 - Divisores: `--color-hairline`, `--color-hairline-strong`.
 - Estados: `--color-semantic-success`, `--color-semantic-warning`,
   `--color-semantic-danger`, `--color-semantic-info`.
-- Elevação: `--shadow-card`.
+- Elevação: `--shadow-card`, `--shadow-popover`, `--shadow-modal`.
+- Movimento: `--ease-out`, `--duration-fast` (120ms), `--duration-base` (200ms), `--duration-slow` (320ms).
+- Medidas: `--sidebar-width`, `--context-panel-width`, `--titlebar-height`.
 
 ## Tipografia e densidade
 
-- Use a pilha nativa definida em `--font-text` e `--font-display`, próxima da SAP 72.
-- Corpo padrão: 14px; metadados: 10–12px; títulos de página: 24px.
+- Pilha de sistema em `--font-text` e `--font-display` (San Francisco no macOS, Segoe UI Variable no Windows).
+- Corpo padrão: 14px; metadados: 10–12px; títulos de página: 24px com espaçamento levemente negativo.
 - Controles têm 32–40px no desktop e mínimo de 44px em interfaces touch.
 - Títulos devem descrever o objeto ou a ação, evitando slogans dentro da área operacional.
 
 ## Layout
 
-- Sidebar fixa à esquerda; área de trabalho usa `--color-canvas`.
-- Cards, modais e painéis usam `--color-surface-1` e borda hairline.
-- `--color-surface-2` diferencia cabeçalhos, filtros e grupos internos.
-- Blue Horizon identifica seleção, foco, links e ação principal; não preencher grandes áreas.
+- Sidebar fixa à esquerda (`--color-sidebar`): workspace, navegação principal (Nova sessão, Pesquisa,
+  Projetos, Clientes, Fluxos), "Mais", sessões agrupadas por cliente e menu do perfil na base.
+- Área de trabalho usa `--color-canvas`; no chat, o painel de contexto acopla à direita (`--color-panel`).
+- Cards, modais e painéis usam `--color-surface-1` e borda hairline; `--color-surface-2` diferencia
+  cabeçalhos, filtros e grupos internos.
+- Azul de sistema identifica foco, links e ação principal; seleção em listas usa `--color-selected`
+  e estados ativos suaves usam `--color-accent-soft`. Não preencher grandes áreas com azul.
 - Listas e tabelas devem priorizar alinhamento, escaneabilidade e cabeçalhos persistentes.
 
 ## Componentes
@@ -77,7 +84,8 @@ de configuração de uma label/coluna e sempre devem ter contraste garantido pel
 
 - `:focus-visible` deve permanecer evidente em todos os temas.
 - Não comunicar status somente por cor; use ícone ou texto.
-- Respeitar contraste WCAG dos temas Horizon e oferecer as duas variantes de alto contraste.
+- Respeitar contraste WCAG nos dois temas; texto secundário nunca abaixo de `--color-ink-tertiary` sobre a superfície.
+- Animações respeitam `prefers-reduced-motion` (regra global em `global.css`).
 - Não desabilitar zoom, seleção de conteúdo ou navegação por teclado em áreas de leitura.
 
 ## Responsividade
@@ -88,7 +96,7 @@ de configuração de uma label/coluna e sempre devem ter contraste garantido pel
 
 ## Checklist de entrega visual
 
-1. Validar Morning Horizon e Evening Horizon.
+1. Validar o tema escuro e o tema claro.
 2. Verificar estados hover, focus, disabled, loading, empty e error.
 3. Testar textos longos, nomes de arquivos e releases SAP extensas.
 4. Confirmar que nenhuma superfície ficou com cor fixa incompatível com light mode.

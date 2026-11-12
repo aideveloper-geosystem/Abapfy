@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { supabase } from '@renderer/lib/supabaseClient'
 import { useAuthStore } from './authStore'
+import { currentCanManageClients, currentWorkspaceId } from './workspaceStore'
 
 export interface ClientModule {
   id: string
@@ -77,7 +78,10 @@ export const useClientsStore = create<ClientsState>((set, get) => ({
   createClient: async (name, description) => {
     const userId = useAuthStore.getState().user?.id
     if (!userId) throw new Error('Sua sessão expirou. Entre novamente para criar o cliente.')
+    const workspaceId = currentWorkspaceId()
     const { error } = await supabase.from('clients').insert({
+      // workspace_id is optional: before migration 041 the column does not exist.
+      ...(workspaceId ? { workspace_id: workspaceId } : {}),
       name: name.trim(),
       description: description.trim() || null,
       created_by: userId,
@@ -87,9 +91,9 @@ export const useClientsStore = create<ClientsState>((set, get) => ({
     await get().load()
   },
   deleteClient: async (clientId) => {
-    const { user, role } = useAuthStore.getState()
-    if (!user || (role !== 'MASTER' && role !== 'ADMIN')) {
-      throw new Error('Somente MASTER ou ADMIN podem excluir clientes.')
+    const { user } = useAuthStore.getState()
+    if (!user || !currentCanManageClients()) {
+      throw new Error('Somente proprietários e administradores do workspace podem excluir clientes.')
     }
     const contents = await Promise.all(
       ['client_files', 'chats', 'projects'].map((table) =>

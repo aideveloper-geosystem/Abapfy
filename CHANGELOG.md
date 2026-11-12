@@ -6,6 +6,28 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+### Workspaces e papéis
+
+- Novo conceito de workspace: reúne pessoas, clientes e o drive compartilhado. Papéis: proprietário, administrador e membro.
+- Quem entra sem workspace cria o seu ou pede para entrar com o código de um existente; proprietário ou administrador aprova ou recusa o pedido.
+- Tela Workspace com código de entrada, pedidos pendentes, membros, alteração de papéis e remoção. O proprietário é o único que muda papéis; o último proprietário não sai nem é rebaixado.
+- Clientes pertencem a um workspace. Projetos, sessões, arquivos do drive e conhecimento de projeto herdam essa fronteira por RLS: ninguém lê ou escreve conteúdo de outro workspace.
+- Usuários existentes são migrados para o workspace "Geral" preservando a hierarquia: MASTER vira proprietário, ADMIN vira administrador e os demais viram membros. Os papéis globais (`app_roles`) seguem valendo para catálogos, chaves de IA e notícias.
+- Antes de aplicar a migração 041 o app continua funcionando no modo anterior, sem a tela de workspace.
+
+### Interface
+
+- Novo visual dark estilo macOS (padrão) e tema claro, ambos por tokens CSS. Os temas SAP Horizon e Quartz foram removidos; preferências salvas viram o tema escuro ou claro equivalente.
+- Sidebar redesenhada: Nova sessão, Pesquisa, Projetos, Clientes e Fluxos; Tarefas, Skills, Agentes e Notícias ficam em "Mais". Sessões agrupadas por cliente.
+- Pesquisa em paleta de comandos (Ctrl+K) sobre sessões, projetos e clientes.
+- Menu do perfil na base da sidebar: Configurações, Uso, Workspace, Changelog e Sair.
+- Painel de contexto acoplado à direita: sessão (cliente, módulo, projeto, agente), ambiente SAP, contexto em %, conectores (skills e MCP) e arquivos. Abre e fecha lembrando a escolha.
+- Animações curtas e discretas, desligadas para quem prefere movimento reduzido.
+
+### Banco de dados
+
+- Aplicar `041_workspaces.sql` e `042_abapfy_themes.sql` no Supabase, nessa ordem. Ambas podem ser reexecutadas.
+
 ## [1.0.11] - 2026-11-12
 
 ### Roteamento e agentes

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { loadTs } from './load-typescript.mjs'
 
-function setup({ role = 'MASTER', user = { id: 'user-1' }, counts = {}, deleteResult = { data: { id: 'client-1' }, error: null }, insertError = null } = {}) {
+function setup({ role = 'MASTER', user = { id: 'user-1' }, counts = {}, deleteResult = { data: { id: 'client-1' }, error: null }, insertError = null, workspaceId = null } = {}) {
   const calls = []
   const supabase = {
     from(table) {
@@ -33,7 +33,11 @@ function setup({ role = 'MASTER', user = { id: 'user-1' }, counts = {}, deleteRe
   }
   const { useClientsStore } = loadTs('src/renderer/src/store/clientsStore.ts', {
     '@renderer/lib/supabaseClient': { supabase },
-    './authStore': { useAuthStore: { getState: () => ({ user, role }) } }
+    './authStore': { useAuthStore: { getState: () => ({ user, role }) } },
+    './workspaceStore': {
+      currentCanManageClients: () => role === 'MASTER' || role === 'ADMIN',
+      currentWorkspaceId: () => workspaceId
+    }
   })
   useClientsStore.setState({
     clients: [{ id: 'client-1' }, { id: 'client-2' }],
@@ -52,6 +56,15 @@ test('creating a client trims input, supplies the authenticated author and reloa
   assert.equal(row.created_by, 'user-1')
   assert.equal(row.updated_by, 'user-1')
   assert.equal(calls.at(-1)[0], 'load')
+})
+
+test('creating a client sends the current workspace, and omits it before migration 041', async () => {
+  const withWorkspace = setup({ workspaceId: 'ws-1' })
+  await withWorkspace.store.getState().createClient('Cliente', '')
+  assert.equal(withWorkspace.calls.find(([action]) => action === 'insert')[2].workspace_id, 'ws-1')
+  const legacy = setup()
+  await legacy.store.getState().createClient('Cliente', '')
+  assert.equal('workspace_id' in legacy.calls.find(([action]) => action === 'insert')[2], false)
 })
 
 test('creating a client surfaces missing sessions and database failures', async () => {
@@ -75,7 +88,7 @@ for (const role of ['MASTER', 'ADMIN']) {
 
 test('users without management permission cannot issue a delete', async () => {
   const { store, calls } = setup({ role: null })
-  await assert.rejects(store.getState().deleteClient('client-1'), /MASTER ou ADMIN/)
+  await assert.rejects(store.getState().deleteClient('client-1'), /proprietários e administradores/)
   assert.equal(calls.length, 0)
 })
 
