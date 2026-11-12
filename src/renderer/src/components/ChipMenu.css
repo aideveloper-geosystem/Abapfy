@@ -1,0 +1,116 @@
+/* One look for every composer control: chip height, border, font and hover. */
+.chip-menu {
+  position: relative;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.composer-chip {
+  height: 28px;
+  max-width: 200px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-ink-subtle);
+  font: 12px var(--font-text);
+  white-space: nowrap;
+}
+
+.composer-chip:hover:not(:disabled),
+.composer-chip[aria-expanded='true'] {
+  background: var(--color-hover);
+  color: var(--color-ink);
+}
+
+.composer-chip:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.composer-chip-active {
+  border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-hairline));
+  color: var(--color-ink);
+}
+
+.composer-chip-required {
+  border-color: color-mix(in srgb, var(--color-semantic-warning) 60%, var(--color-hairline));
+  color: var(--color-semantic-warning);
+}
+
+.composer-chip svg {
+  flex-shrink: 0;
+}
+
+.composer-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chip-menu-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  width: 290px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-1);
+  box-shadow: var(--shadow-popover);
+  animation: rise-in var(--duration-fast) var(--ease-out);
+}
+
+.chip-menu-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 7px 10px;
+  border-radius: var(--radius-md);
+  color: var(--color-ink-muted);
+  font: 13px var(--font-text);
+  text-align: left;
+}
+
+.chip-menu-item small {
+  color: var(--color-ink-tertiary);
+  font-size: 11px;
+}
+
+.chip-menu-item:hover:not(:disabled) {
+  background: var(--color-hover);
+  color: var(--color-ink);
+}
+
+.chip-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chip-menu-item-active {
+  background: var(--color-accent-soft);
+  color: var(--color-ink);
+}
+
+.chip-menu-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--color-hairline);
+}
+
+.chip-menu-note {
+  padding: 6px 10px;
+  color: var(--color-ink-tertiary);
+  font-size: 11.5px;
+  line-height: 1.5;
+}

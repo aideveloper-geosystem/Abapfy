@@ -42,6 +42,7 @@ export function ContextMeter({
             }}
           />
         )}
+        <span className="context-meter-percent">Contexto {Math.max(0, Math.min(percent, 999))}%</span>
       </summary>
       <div className="context-meter-panel">
         <strong>Contexto da conversa</strong>

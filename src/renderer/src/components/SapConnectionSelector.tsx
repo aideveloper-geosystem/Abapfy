@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Settings2 } from 'lucide-react'
+import { Server } from 'lucide-react'
+import { ChipMenu } from '@renderer/components/ChipMenu'
 import { supabase } from '@renderer/lib/supabaseClient'
 import type { SapAdtConnectionView } from '../../../shared/sapAdt'
 import './SapConnectionSelector.css'
@@ -86,71 +87,62 @@ export function SapConnectionSelector({
     )
   }, [rows, selected, onConnectionChange])
   const selectedConnection = rows.find((row) => row.id === selected)
+  const label = loading
+    ? 'Carregando SAP…'
+    : selectedConnection
+      ? `${selectedConnection.name} · ${environments[selectedConnection.environment]}`
+      : 'Sem conexão SAP'
   return (
     <div className="sap-connection-picker">
-      <select
-        aria-label="Ambiente SAP"
-        className={selected ? 'sap-connection-active' : ''}
-        value={selected}
+      <ChipMenu
+        icon={<Server size={14} strokeWidth={1.75} />}
+        label={label}
+        title={error || 'Conexão SAP desta conversa. Apenas ela será disponibilizada ao agente.'}
         disabled={disabled || loading || !userId}
-        title={
-          error ||
-          'Selecione a conexão SAP para esta conversa. Apenas ela será disponibilizada ao agente.'
-        }
-        onChange={(event) =>
-          onChange(
-            event.target.value && userId ? { userId, connectionId: event.target.value } : null
-          )
-        }
+        active={Boolean(selectedConnection)}
       >
-        <option value="">{loading ? 'Carregando SAP…' : 'Sem conexão SAP'}</option>
-        {rows.map((row) => (
-          <option key={row.id} value={row.id} disabled={!row.enabled || !row.hasPassword}>
-            {row.name} · {environments[row.environment]} · {row.client}
-            {!row.enabled ? ' · desativada' : !row.hasPassword ? ' · sem senha' : ''}
-          </option>
-        ))}
-      </select>
-      <button
-        type="button"
-        onClick={onManage}
-        disabled={disabled}
-        title="Gerenciar minhas conexões SAP"
-        aria-label="Gerenciar minhas conexões SAP"
-      >
-        <Settings2 size={15} />
-      </button>
-      {selectedConnection && (
-        <details className="sap-capabilities">
-          <summary title="Ver permissões da conexão selecionada">Permissões SAP</summary>
-          <div>
-            <strong>
-              {selectedConnection.name} · {environments[selectedConnection.environment]} ·{' '}
-              {selectedConnection.client}
-            </strong>
-            {(
-              [
-                ['allowSource', 'Ler fontes'],
-                ['allowWrite', 'Editar e salvar inativo'],
-                ['allowQuality', 'Validar sintaxe e qualidade'],
-                ['allowTransports', 'Gerenciar requests'],
-                ['allowActivate', 'Ativar objetos']
-              ] as const
-            ).map(([key, label]) => (
-              <p key={key}>
-                {label}: {selectedConnection[key] ? 'habilitado' : 'desativado'}
-              </p>
-            ))}
-            <p>
-              O agente também precisa estar autorizado em Integrações. Cada gravação passa por
-              revisão.
-            </p>
-            <button type="button" onClick={onManage} disabled={disabled}>
-              Configurar permissões
+        {(close) => (
+          <>
+            <button type="button" role="menuitem" className={`chip-menu-item ${!selected ? 'chip-menu-item-active' : ''}`} onClick={() => { onChange(null); close() }}>
+              Sem conexão SAP
             </button>
-          </div>
-        </details>
-      )}
+            {rows.map((row) => (
+              <button
+                key={row.id}
+                type="button"
+                role="menuitem"
+                className={`chip-menu-item ${row.id === selected ? 'chip-menu-item-active' : ''}`}
+                disabled={!row.enabled || !row.hasPassword}
+                onClick={() => { if (userId) onChange({ userId, connectionId: row.id }); close() }}
+              >
+                {row.name} · {environments[row.environment]} · {row.client}
+                {(!row.enabled || !row.hasPassword) && <small>{!row.enabled ? 'Desativada' : 'Sem senha'}</small>}
+              </button>
+            ))}
+            {selectedConnection && (
+              <p className="chip-menu-note">
+                {(
+                  [
+                    ['allowSource', 'Ler fontes'],
+                    ['allowWrite', 'Editar e salvar inativo'],
+                    ['allowQuality', 'Validar sintaxe e qualidade'],
+                    ['allowTransports', 'Gerenciar requests'],
+                    ['allowActivate', 'Ativar objetos']
+                  ] as const
+                ).map(([key, text]) => (
+                  <span key={key} className="sap-permission">
+                    {text}: {selectedConnection[key] ? 'habilitado' : 'desativado'}
+                  </span>
+                ))}
+              </p>
+            )}
+            <div className="chip-menu-divider" role="separator" />
+            <button type="button" role="menuitem" className="chip-menu-item" onClick={() => { close(); onManage() }}>
+              Gerenciar conexões SAP…
+            </button>
+          </>
+        )}
+      </ChipMenu>
       {error && (
         <span className="sap-connection-error" role="alert" title={error}>
           Conexões indisponíveis

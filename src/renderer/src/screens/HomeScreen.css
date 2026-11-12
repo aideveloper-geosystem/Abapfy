@@ -996,3 +996,69 @@
 .home-quick-list svg { flex-shrink: 0; color: var(--color-ink-tertiary); }
 .home-quick-more { color: var(--color-ink-tertiary) !important; }
 .home-quick-heading { margin: var(--space-sm) 10px 2px; color: var(--color-ink-tertiary); font-size: 11px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; }
+
+/* ---- Round 2: controls live inside the input card, one footer row, uniform chips ---- */
+.home-composer-card { container-type: inline-size; gap: 6px; }
+.home-composer-card .home-composer-toolbar {
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: 4px 0 0;
+  min-width: 0;
+}
+.home-composer-toolbar .composer-chip,
+.home-composer-toolbar .home-model-trigger,
+.home-composer-toolbar .context-meter > summary {
+  height: 28px;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-ink-subtle);
+  font: 12px var(--font-text);
+}
+.home-composer-toolbar .home-model-trigger { width: auto; max-width: 230px; padding: 0 9px; gap: 6px; }
+.home-composer-toolbar .home-model-trigger:hover:not(:disabled),
+.home-composer-toolbar .context-meter > summary:hover { background: var(--color-hover); color: var(--color-ink); }
+.home-composer-toolbar .context-meter > summary { width: auto; gap: 6px; padding: 0 9px; }
+.home-composer-toolbar .context-meter-percent { white-space: nowrap; }
+.home-composer-toolbar .home-composer-icon-btn {
+  width: 28px; height: 28px; border: 1px solid var(--color-hairline); border-radius: var(--radius-pill); color: var(--color-ink-subtle);
+}
+.home-composer-toolbar .home-composer-icon-btn:hover { background: var(--color-hover); color: var(--color-ink); }
+.home-composer-toolbar .sap-connection-picker { flex-shrink: 0; }
+.home-composer-toolbar .home-composer-spacer { flex: 1 1 0; min-width: 4px; }
+.home-composer-toolbar .home-composer-send { width: 30px; height: 30px; flex-shrink: 0; }
+.home-composer-toolbar .home-agent-select { position: relative; flex-shrink: 0; }
+.home-composer-toolbar .home-model-select { flex-shrink: 1; min-width: 0; }
+.home-composer-toolbar .context-meter { flex-shrink: 0; }
+.home-composer-toolbar .context-meter-panel { left: auto; right: 0; }
+.home-client-group > strong { display: block; padding: 6px 10px 2px; color: var(--color-ink-tertiary); font-size: 11px; font-weight: 600; letter-spacing: 0.3px; }
+.sap-permission { display: block; }
+
+/* Narrow input card: chips shrink to icon-only (labels stay in tooltips) so the footer never wraps. */
+@container (max-width: 640px) {
+  .home-composer-toolbar .composer-chip { padding: 0 8px; }
+  .home-composer-toolbar .composer-chip-label,
+  .home-composer-toolbar .composer-chip-caret,
+  .home-composer-toolbar .context-meter-percent { display: none; }
+  .home-composer-toolbar .home-model-trigger { max-width: 150px; }
+}
+@container (max-width: 420px) {
+  .home-composer-toolbar .home-model-trigger > span { display: none; }
+}
+
+/* Suggestions: one horizontal row of quiet pills right under the greeting. */
+.home-pills { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: var(--space-md); max-width: 640px; }
+.home-pills button {
+  display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px;
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-pill);
+  color: var(--color-ink-subtle); font: 12.5px var(--font-text); white-space: nowrap;
+}
+.home-pills button:hover { background: var(--color-hover); color: var(--color-ink); border-color: var(--color-hairline-strong); }
+.home-pills svg { color: var(--color-ink-tertiary); }
+.home-pills-more { border-style: dashed !important; }
+.home-main-empty .home-welcome { max-width: 760px; padding-bottom: var(--space-md); }
+/* Chips yield space (ellipsis) before the footer ever overflows or wraps. */
+.home-composer-toolbar .chip-menu { flex: 0 1 auto; min-width: 34px; }
+.home-composer-toolbar .composer-chip { max-width: 100%; }
+.home-composer-toolbar .sap-connection-picker { flex: 0 1 auto; min-width: 34px; }
+.home-composer-toolbar .sap-connection-picker .chip-menu { width: 100%; }
