@@ -1675,6 +1675,7 @@ export function HomeScreen(): JSX.Element {
                   title="Fluxo da conversa"
                   disabled={isRouting || isStreaming}
                   active={advancedFlowEnabled && advancedFlowSelected}
+                  low
                 >
                   {(close) => (
                     <>

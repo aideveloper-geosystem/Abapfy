@@ -100,6 +100,7 @@ export function SapConnectionSelector({
         title={error || 'Conexão SAP desta conversa. Apenas ela será disponibilizada ao agente.'}
         disabled={disabled || loading || !userId}
         active={Boolean(selectedConnection)}
+        low
       >
         {(close) => (
           <>

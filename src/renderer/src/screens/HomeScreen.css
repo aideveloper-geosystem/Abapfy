@@ -128,7 +128,7 @@
   flex-direction: column;
   gap: var(--space-md);
   width: 100%;
-  max-width: 720px;
+  max-width: 920px;
   margin: 0 auto;
   padding-bottom: var(--space-sm);
 }
@@ -956,7 +956,7 @@
 .home-glyph { fill: var(--color-primary); margin-bottom: var(--space-xs); animation: rise-in var(--duration-slow) var(--ease-out); }
 .home-welcome-title { font-size: 26px; letter-spacing: -0.5px; }
 
-.home-composer { background: transparent; border: 0; padding: 0; gap: var(--space-xs); max-width: 760px; }
+.home-composer { background: transparent; border: 0; padding: 0; gap: var(--space-xs); max-width: 980px; }
 .home-composer:focus-within { border-color: transparent; }
 .home-composer-card {
   display: flex;
@@ -1035,13 +1035,7 @@
 .sap-permission { display: block; }
 
 /* Narrow input card: chips shrink to icon-only (labels stay in tooltips) so the footer never wraps. */
-@container (max-width: 640px) {
-  .home-composer-toolbar .composer-chip { padding: 0 8px; }
-  .home-composer-toolbar .composer-chip-label,
-  .home-composer-toolbar .composer-chip-caret,
-  .home-composer-toolbar .context-meter-percent { display: none; }
-  .home-composer-toolbar .home-model-trigger { max-width: 150px; }
-}
+
 @container (max-width: 420px) {
   .home-composer-toolbar .home-model-trigger > span { display: none; }
 }
@@ -1056,9 +1050,52 @@
 .home-pills button:hover { background: var(--color-hover); color: var(--color-ink); border-color: var(--color-hairline-strong); }
 .home-pills svg { color: var(--color-ink-tertiary); }
 .home-pills-more { border-style: dashed !important; }
-.home-main-empty .home-welcome { max-width: 760px; padding-bottom: var(--space-md); }
+.home-main-empty .home-welcome { max-width: 980px; padding-bottom: var(--space-md); }
 /* Chips yield space (ellipsis) before the footer ever overflows or wraps. */
 .home-composer-toolbar .chip-menu { flex: 0 1 auto; min-width: 34px; }
 .home-composer-toolbar .composer-chip { max-width: 100%; }
 .home-composer-toolbar .sap-connection-picker { flex: 0 1 auto; min-width: 34px; }
 .home-composer-toolbar .sap-connection-picker .chip-menu { width: 100%; }
+
+/* ---- Round 3: roomier input, no overlap, labels yield by priority ---- */
+.home-composer { max-width: 980px; }
+.home-composer-card { padding: 18px 20px 12px; gap: 10px; }
+.home-composer-card .home-composer-input { min-height: 120px; padding: 4px 2px; font-size: 15px; }
+.home-main:not(.home-main-empty) .home-composer-card .home-composer-input { min-height: 64px; }
+.home-composer-card .home-composer-toolbar { gap: 10px; padding-top: 6px; }
+.home-composer-toolbar .composer-chip,
+.home-composer-toolbar .home-model-trigger,
+.home-composer-toolbar .context-meter > summary { height: 30px; padding: 0 12px; }
+.home-composer-toolbar .composer-chip { max-width: 240px; }
+.home-composer-toolbar .composer-chip-label { max-width: 190px; }
+.home-composer-toolbar .home-composer-icon-btn { width: 30px; height: 30px; }
+
+/* Right side is reserved: it never shrinks and never overlaps the left chips. */
+.home-composer-toolbar .home-model-select,
+.home-composer-toolbar .context-meter,
+.home-composer-toolbar .home-composer-send,
+.home-composer-toolbar .home-composer-icon-btn,
+.home-composer-toolbar > button { flex: 0 0 auto; }
+.home-composer-toolbar .home-model-trigger { max-width: none; white-space: nowrap; }
+.home-composer-toolbar .home-model-trigger > span { overflow: visible; text-overflow: clip; }
+.home-composer-toolbar .chip-menu,
+.home-composer-toolbar .sap-connection-picker { flex: 0 1 auto; min-width: 0; }
+.home-composer-toolbar .composer-chip { max-width: 100%; }
+.home-composer-toolbar .home-composer-spacer { flex: 1 1 8px; min-width: 8px; }
+
+/* Tier 1: below ~900px the low-priority chips (flow, SAP, context) keep only their icon. */
+@container (max-width: 900px) {
+  .home-composer-toolbar .composer-chip-low { padding: 0 9px; }
+  .home-composer-toolbar .composer-chip-low .composer-chip-label,
+  .home-composer-toolbar .composer-chip-low .composer-chip-caret,
+  .home-composer-toolbar .composer-chip-low-label { display: none; }
+}
+/* Tier 2: below ~560px everything but the model and send collapses to icons. */
+@container (max-width: 560px) {
+  .home-composer-toolbar .composer-chip { padding: 0 9px; }
+  .home-composer-toolbar .composer-chip .composer-chip-label,
+  .home-composer-toolbar .composer-chip .composer-chip-caret { display: none; }
+}
+@container (max-width: 420px) {
+  .home-composer-toolbar .home-model-trigger > span { display: none; }
+}

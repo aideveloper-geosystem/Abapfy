@@ -11,12 +11,14 @@ interface ChipMenuProps {
   active?: boolean
   /** Visual hint for a required, still empty choice. */
   required?: boolean
+  /** Less important chip: shows only its icon first when the input card gets narrow. */
+  low?: boolean
   /** Popover content; call `close` after a choice. */
   children: (close: () => void) => ReactNode
 }
 
 /** Compact chip that opens a small popover above the composer (replaces native selects). */
-export function ChipMenu({ icon, label, title, disabled, active, required, children }: ChipMenuProps): JSX.Element {
+export function ChipMenu({ icon, label, title, disabled, active, required, low, children }: ChipMenuProps): JSX.Element {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -40,7 +42,7 @@ export function ChipMenu({ icon, label, title, disabled, active, required, child
     <div className="chip-menu" ref={ref}>
       <button
         type="button"
-        className={`composer-chip ${active ? 'composer-chip-active' : ''} ${required ? 'composer-chip-required' : ''}`}
+        className={`composer-chip ${active ? 'composer-chip-active' : ''} ${required ? 'composer-chip-required' : ''} ${low ? 'composer-chip-low' : ''}`}
         disabled={disabled}
         title={title ?? label}
         aria-haspopup="menu"
