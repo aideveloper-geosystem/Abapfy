@@ -22,7 +22,6 @@ import {
   X,
   Zap
 } from 'lucide-react'
-import abapfyLogo from '@renderer/assets/abapfy-horizon-mark.png'
 import { Sidebar } from '@renderer/components/Sidebar'
 import { WindowsDictationButton } from '@renderer/components/WindowsDictationButton'
 import { useLocalFeaturesStore } from '@renderer/store/localFeaturesStore'
@@ -53,7 +52,7 @@ import { SessionContextPanel } from '@renderer/components/SessionContextPanel'
 import { WorkspaceScreen } from '@renderer/screens/WorkspaceScreen'
 import { AiLoadingState } from '@renderer/components/AiMessageActions'
 import { SapConnectionSelector, type SapSelection } from '@renderer/components/SapConnectionSelector'
-import { PROMPT_SHORTCUTS, PromptStarters } from '@renderer/components/PromptShortcuts'
+import { AbapfyGlyph, PROMPT_SHORTCUTS, PromptStarters } from '@renderer/components/PromptShortcuts'
 import { AI_PRESENTATION_CONTRACT } from '@renderer/lib/aiPresentation'
 import { useAuthStore } from '@renderer/store/authStore'
 import { useSettingsStore } from '@renderer/store/settingsStore'
@@ -1335,6 +1334,11 @@ export function HomeScreen(): JSX.Element {
   }
 
   const firstName = profile?.nome?.split(' ')[0]
+  const allRecentChats = useChatStore((state) => state.recentChats)
+  const recentSessions = allRecentChats
+    .filter((chat) => chat.userId === user?.id)
+    .slice(0, 3)
+    .map((chat) => ({ id: chat.id, title: chat.title, clientName: clients.find((client) => client.id === chat.clientId)?.name ?? '' }))
   const sessionFiles = useMemo(() => {
     const names = messages
       .filter((message) => message.role === 'user')
@@ -1412,7 +1416,7 @@ export function HomeScreen(): JSX.Element {
       {view === 'workspace' && <WorkspaceScreen />}
 
       {view === 'chat' && (
-        <div className={`home-main ${sessionPanelOpen ? 'home-main-with-panel' : ''}`}>
+        <div className={`home-main ${sessionPanelOpen ? 'home-main-with-panel' : ''} ${messages.length === 0 ? 'home-main-empty' : ''}`}>
           {!sessionPanelOpen && <button
             type="button"
             className={`home-session-context-trigger ${sessionPanelOpen ? 'home-session-context-trigger-active' : ''}`}
@@ -1474,14 +1478,11 @@ export function HomeScreen(): JSX.Element {
           <div className="home-messages">
             {messages.length === 0 ? (
               <div className="home-welcome">
-                <img src={abapfyLogo} alt="" className="home-welcome-logo" />
+                <AbapfyGlyph />
                 <h1 className="home-welcome-title">
-                  {firstName ? `Bem-vindo, ${firstName}` : 'Bem-vindo ao Abapfy'}
+                  {firstName ? `Olá, ${firstName}` : 'Olá'}
                 </h1>
-                <p className="home-welcome-subtitle">
-                  Pergunte sobre ABAP, depure erros de dump ou peça ajuda com suas rotinas SAP.
-                </p>
-                <PromptStarters onSelect={preparePrompt} />
+                <p className="home-welcome-subtitle">Em que vamos trabalhar hoje?</p>
               </div>
             ) : (
               <div className="home-messages-list">
@@ -1503,6 +1504,7 @@ export function HomeScreen(): JSX.Element {
           </div>
 
           <div className="home-composer">
+            <div className="home-composer-card">
             {(currentProject || attachments.length > 0 || selectedFolderId || activeChatLabel || folderNotice) && (
               <div className="home-composer-badges">
                 {currentProject && (
@@ -1559,7 +1561,65 @@ export function HomeScreen(): JSX.Element {
             {promptTrigger && !shortcutsDismissed && <div className="ai-command-menu" id="composer-shortcuts" role="listbox" aria-label={promptTrigger[1] === '/' ? 'Comandos de prompt' : 'Pastas do contexto'}>
               {promptOptions.length ? promptOptions.map((option, index) => <button type="button" role="option" id={`composer-shortcut-${index}`} aria-selected={index === Math.min(shortcutIndex, promptOptions.length - 1)} key={option.folderId ?? option.label} onClick={() => applyPromptOption(index)}><strong>{option.label}</strong><span>{option.detail}</span></button>) : <p className="ai-empty">{promptTrigger[1] === '@' ? 'Nenhuma pasta disponível para este módulo.' : 'Nenhum comando encontrado.'}</p>}
             </div>}
-            <div className="home-composer-context-row">
+            {attachmentNotice && <p className="home-folder-notice" role="alert">{attachmentNotice}</p>}
+            <textarea
+              ref={composerInputRef}
+              className="home-composer-input"
+              placeholder="Descreva uma tarefa ou faça uma pergunta"
+              rows={1}
+              title="Enter envia · Shift+Enter quebra linha"
+              value={input}
+              aria-label="Mensagem para o agente"
+              aria-controls={promptOptions.length ? 'composer-shortcuts' : undefined}
+              aria-activedescendant={promptOptions.length ? `composer-shortcut-${Math.min(shortcutIndex, promptOptions.length - 1)}` : undefined}
+              onChange={(event) => { setInput(event.target.value); setShortcutsDismissed(false); setShortcutIndex(0) }}
+              onPaste={(event) => {
+                const images = clipboardImages(event.clipboardData)
+                if (!images.length) return
+                event.preventDefault()
+                handleFilesSelected(images)
+                const text = event.clipboardData.getData('text/plain')
+                if (text) { const start = event.currentTarget.selectionStart; const end = event.currentTarget.selectionEnd; setInput((value) => value.slice(0, start) + text + value.slice(end)) }
+              }}
+              onKeyDown={handleKeyDown}
+            />
+              {advancedFlowEnabled && advancedFlowSelected && <FlowTokenNotice id="flow-chat-token-warning" compact />}
+            </div>
+              <div className="home-composer-toolbar">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="home-file-input-hidden"
+                accept=".png,.jpg,.jpeg,.webp,.txt,.md,.markdown,.json,.yaml,.yml,.xml,.csv,.log,.pdf,.docx,.abap,.cds,.dcl,.sql,.js,.jsx,.ts,.tsx,.py,.java,.cs,.c,.cpp,.h,.go,.rb,.php,.sh,.ps1,.html,.css,.scss"
+                onChange={(event) => handleFilesSelected(event.target.files)}
+              />
+<div className="home-agent-select home-environment-select" ref={clientMenuRef}>
+                <button
+                  type="button"
+                  className={`home-agent-trigger home-client-trigger ${!currentClientId || !currentModuleId ? 'home-client-trigger-required' : ''}`}
+                  disabled={Boolean(currentChatId)}
+                  title={
+                    currentChatId
+                      ? 'O cliente e módulo ficam fixos após a primeira mensagem'
+                      : 'Selecionar cliente e módulo'
+                  }
+                  onClick={() => setClientMenuOpen((open) => !open)}
+                >
+                  <Building2 size={14} strokeWidth={1.75} />
+                  <span>{selectedClient && selectedModule ? `${selectedClient.name} / ${selectedModule.name}` : 'Cliente / módulo *'}</span>
+                  {!currentChatId && <ChevronDown size={12} strokeWidth={1.75} />}
+                </button>
+                {clientMenuOpen && !currentChatId && (
+                  <div className="home-agent-menu home-environment-menu home-client-menu">
+                    {clients.map((client) => <div key={client.id} className="home-client-group"><strong>{client.name}</strong>{modules.filter((module) => module.clientId === client.id).map((module) => <button key={module.id} type="button" className={`home-agent-menu-item ${module.id === currentModuleId ? 'home-agent-menu-item-active' : ''}`} onClick={() => { setCurrentClientId(client.id); setCurrentModuleId(module.id); setSelectedFolderId(null); setFolderNotice(null); setCurrentProject(null); setClientMenuOpen(false) }}><span>{module.name}</span><small>{client.name}</small></button>)}</div>)}
+                    {clients.length === 0 && <span className="home-client-empty">Cadastre um cliente e módulo em Clientes.</span>}
+                  </div>
+                )}
+              </div>
+
+                          
+
               <div className="home-agent-select" ref={agentMenuRef}>
                 <button
                   type="button"
@@ -1609,63 +1669,7 @@ export function HomeScreen(): JSX.Element {
                 )}
               </div>
 
-              <div className="home-agent-select home-environment-select" ref={clientMenuRef}>
-                <button
-                  type="button"
-                  className={`home-agent-trigger home-client-trigger ${!currentClientId || !currentModuleId ? 'home-client-trigger-required' : ''}`}
-                  disabled={Boolean(currentChatId)}
-                  title={
-                    currentChatId
-                      ? 'O cliente e módulo ficam fixos após a primeira mensagem'
-                      : 'Selecionar cliente e módulo'
-                  }
-                  onClick={() => setClientMenuOpen((open) => !open)}
-                >
-                  <Building2 size={14} strokeWidth={1.75} />
-                  <span>{selectedClient && selectedModule ? `${selectedClient.name} / ${selectedModule.name}` : 'Cliente / módulo *'}</span>
-                  {!currentChatId && <ChevronDown size={12} strokeWidth={1.75} />}
-                </button>
-                {clientMenuOpen && !currentChatId && (
-                  <div className="home-agent-menu home-environment-menu home-client-menu">
-                    {clients.map((client) => <div key={client.id} className="home-client-group"><strong>{client.name}</strong>{modules.filter((module) => module.clientId === client.id).map((module) => <button key={module.id} type="button" className={`home-agent-menu-item ${module.id === currentModuleId ? 'home-agent-menu-item-active' : ''}`} onClick={() => { setCurrentClientId(client.id); setCurrentModuleId(module.id); setSelectedFolderId(null); setFolderNotice(null); setCurrentProject(null); setClientMenuOpen(false) }}><span>{module.name}</span><small>{client.name}</small></button>)}</div>)}
-                    {clients.length === 0 && <span className="home-client-empty">Cadastre um cliente e módulo em Clientes.</span>}
-                  </div>
-                )}
-              </div>
-
-                          </div>
-            {attachmentNotice && <p className="home-folder-notice" role="alert">{attachmentNotice}</p>}
-            <textarea
-              ref={composerInputRef}
-              className="home-composer-input"
-              placeholder="Pergunte alguma coisa sobre SAP/ABAP…"
-              rows={1}
-              title="Enter envia · Shift+Enter quebra linha"
-              value={input}
-              aria-label="Mensagem para o agente"
-              aria-controls={promptOptions.length ? 'composer-shortcuts' : undefined}
-              aria-activedescendant={promptOptions.length ? `composer-shortcut-${Math.min(shortcutIndex, promptOptions.length - 1)}` : undefined}
-              onChange={(event) => { setInput(event.target.value); setShortcutsDismissed(false); setShortcutIndex(0) }}
-              onPaste={(event) => {
-                const images = clipboardImages(event.clipboardData)
-                if (!images.length) return
-                event.preventDefault()
-                handleFilesSelected(images)
-                const text = event.clipboardData.getData('text/plain')
-                if (text) { const start = event.currentTarget.selectionStart; const end = event.currentTarget.selectionEnd; setInput((value) => value.slice(0, start) + text + value.slice(end)) }
-              }}
-              onKeyDown={handleKeyDown}
-            />
-              {advancedFlowEnabled && advancedFlowSelected && <FlowTokenNotice id="flow-chat-token-warning" compact />}
-              <div className="home-composer-toolbar">
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="home-file-input-hidden"
-                accept=".png,.jpg,.jpeg,.webp,.txt,.md,.markdown,.json,.yaml,.yml,.xml,.csv,.log,.pdf,.docx,.abap,.cds,.dcl,.sql,.js,.jsx,.ts,.tsx,.py,.java,.cs,.c,.cpp,.h,.go,.rb,.php,.sh,.ps1,.html,.css,.scss"
-                onChange={(event) => handleFilesSelected(event.target.files)}
-              />
+              
               <div className="home-agent-select home-attachment-select" ref={attachmentMenuRef}>
                 <button type="button" className="home-composer-icon-btn" title="Anexar arquivo ou usar pasta do drive" onClick={() => { setAttachmentMenuOpen((open) => !open); setFolderPickerOpen(false) }}>
                   <Paperclip size={16} strokeWidth={1.75} />
@@ -1692,8 +1696,8 @@ export function HomeScreen(): JSX.Element {
                 )}
               </div>
 
-              <ContextMeter used={contextUsed} settings={compactionSettings} phase={contextState?.phase ?? 'idle'} detail={contextState?.detail ?? ''} error={contextState?.error} covered={contextState?.snapshot?.coveredCount ?? 0} disabled={!currentChatId || isStreaming} onCompact={() => void handleCompact()} />
               <div className="home-composer-spacer" />
+              <ContextMeter used={contextUsed} settings={compactionSettings} phase={contextState?.phase ?? 'idle'} detail={contextState?.detail ?? ''} error={contextState?.error} covered={contextState?.snapshot?.coveredCount ?? 0} disabled={!currentChatId || isStreaming} onCompact={() => void handleCompact()} />
 
               {advancedFlowOwner === user?.id && flowsEnabled && <select className="home-flow-toggle" aria-label="Fluxo da conversa" disabled={isRouting || isStreaming} value={advancedFlowEnabled && advancedFlowSelected ? selectedFlowId ?? '' : ''} onChange={e => { if (e.target.value === '__manage') { setView('flows'); return } if (!e.target.value) { setAdvancedFlowSelected(false); return } selectSavedFlow(user!.id,e.target.value); setAdvancedFlowSelected(true) }}><option value="">Fluxo padrão</option>{savedFlows.filter(f => f.config.enabled).map(f => <option key={f.id} value={f.id}>{f.config.name}</option>)}<option value="__manage">Gerenciar fluxos…</option></select>}
               <SapConnectionSelector userId={user?.id} value={sapSelection} onChange={setSapSelection} onConnectionChange={setSapConnectionView} refreshKey={settingsOpen} disabled={isRouting || isStreaming} onManage={() => { setSettingsSection('mcp'); setSettingsOpen(true) }} />
@@ -1826,6 +1830,9 @@ export function HomeScreen(): JSX.Element {
                 </button>
               )}
             </div>
+            {messages.length === 0 && !input && (
+              <PromptStarters onSelect={preparePrompt} recent={recentSessions} onOpenChat={(id) => void handleSelectChat(id)} />
+            )}
           </div>
         </div>
       )}

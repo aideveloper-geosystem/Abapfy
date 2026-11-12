@@ -22,6 +22,7 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 - Pesquisa em paleta de comandos (Ctrl+K) sobre sessões, projetos e clientes.
 - Menu do perfil na base da sidebar: Configurações, Uso, Workspace, Changelog e Sair.
 - Painel de contexto acoplado à direita: sessão (cliente, módulo, projeto, agente), ambiente SAP, contexto em %, conectores (skills e MCP) e arquivos. Abre e fecha lembrando a escolha.
+- Nova sessão redesenhada: glifo pixel discreto, saudação curta, caixa de texto grande com a barra de controles logo abaixo (cliente/módulo, agente, anexar e conexão SAP à esquerda; contexto, modelo, microfone e envio à direita) e lista discreta de ações rápidas e sessões recentes, no lugar do logo grande e da grade de cartões.
 - Animações curtas e discretas, desligadas para quem prefere movimento reduzido.
 
 ### Banco de dados

@@ -948,3 +948,51 @@
 .home-attachment-chip:has(.home-attachment-preview) { max-width: 260px; padding: 5px 8px; }
 .chat-message-image-previews { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .chat-message-image-previews img { max-width: 240px; max-height: 180px; object-fit: contain; border-radius: 8px; }
+
+/* ---- New session: glyph + greeting, big input card, control bar below, quiet quick actions ---- */
+.home-main-empty { justify-content: center; }
+.home-main-empty .home-messages { flex: 0 0 auto; min-height: 0; overflow: visible; }
+.home-main-empty .home-welcome { flex: 0 0 auto; padding-bottom: var(--space-sm); }
+.home-glyph { fill: var(--color-primary); margin-bottom: var(--space-xs); animation: rise-in var(--duration-slow) var(--ease-out); }
+.home-welcome-title { font-size: 26px; letter-spacing: -0.5px; }
+
+.home-composer { background: transparent; border: 0; padding: 0; gap: var(--space-xs); max-width: 760px; }
+.home-composer:focus-within { border-color: transparent; }
+.home-composer-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px 8px;
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface-1);
+  box-shadow: var(--shadow-card);
+}
+.home-composer-card:focus-within { border-color: color-mix(in srgb, var(--color-primary) 60%, var(--color-hairline)); box-shadow: 0 0 0 3px var(--color-accent-soft); }
+.home-composer-card .home-composer-input { min-height: 84px; font-size: 14.5px; }
+.home-main:not(.home-main-empty) .home-composer-card .home-composer-input { min-height: 44px; }
+
+/* Control bar: selectors on the left, model / context / mic / send on the right. */
+.home-composer-toolbar { padding: 0 2px; gap: 4px; flex-wrap: wrap; }
+.home-composer-toolbar .home-agent-trigger { height: 28px; padding: 0 8px; background: transparent; color: var(--color-ink-subtle); border-radius: var(--radius-md); max-width: 220px; }
+.home-composer-toolbar .home-agent-trigger:hover:not(:disabled) { background: var(--color-hover); color: var(--color-ink); }
+.home-composer-toolbar .home-environment-select { margin-left: 0; }
+.home-composer-toolbar .home-client-trigger-required { color: var(--color-semantic-warning); }
+.home-composer-toolbar .home-composer-icon-btn { width: 28px; height: 28px; color: var(--color-ink-subtle); }
+.home-composer-toolbar .home-model-select { margin-left: 0; }
+.home-composer-toolbar .home-model-trigger { width: auto; background: transparent; color: var(--color-ink-subtle); }
+.home-composer-toolbar .home-model-trigger:hover:not(:disabled) { background: var(--color-hover); color: var(--color-ink); }
+.home-composer-toolbar .home-composer-send { border-radius: var(--radius-pill); background: var(--color-primary); color: var(--color-on-primary); }
+
+/* Compact popovers open above the bar, like the Claude Code environment menu. */
+.home-composer-toolbar .home-agent-menu { border-radius: var(--radius-lg); background: var(--color-surface-1); border: 1px solid var(--color-hairline); box-shadow: var(--shadow-popover); animation: rise-in var(--duration-fast) var(--ease-out); }
+
+.home-quick { display: flex; flex-direction: column; gap: 2px; padding: var(--space-sm) var(--space-xs) 0; }
+.home-quick-list { list-style: none; display: flex; flex-direction: column; }
+.home-quick-list button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: var(--radius-md); color: var(--color-ink-subtle); font: 13px var(--font-text); text-align: left; }
+.home-quick-list button:hover { background: var(--color-hover); color: var(--color-ink); }
+.home-quick-list button > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-quick-list small { color: var(--color-ink-tertiary); font-size: 11.5px; }
+.home-quick-list svg { flex-shrink: 0; color: var(--color-ink-tertiary); }
+.home-quick-more { color: var(--color-ink-tertiary) !important; }
+.home-quick-heading { margin: var(--space-sm) 10px 2px; color: var(--color-ink-tertiary); font-size: 11px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; }
