@@ -1,4 +1,5 @@
 import { legacyExtraction, readCompleteClientFile } from '@renderer/lib/clientFolderContext'
+import { ClientPatternsTab } from '@renderer/components/ClientPatternsTab'
 import { isEfModule } from '@renderer/lib/efDrive'
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { createPortal } from 'react-dom'
@@ -23,12 +24,13 @@ import { RoleBadge } from '@renderer/components/RoleBadge'
 import { EMPTY_STATS, relativeActivity } from '@renderer/lib/clientCatalog'
 import './ClientsScreen.css'
 
-type ClientTab = 'overview' | 'drive' | 'projects' | 'sessions'
+type ClientTab = 'overview' | 'drive' | 'projects' | 'sessions' | 'patterns'
 const TABS: { id: ClientTab; label: string }[] = [
   { id: 'overview', label: 'Visão geral' },
   { id: 'drive', label: 'Drive' },
   { id: 'projects', label: 'Projetos' },
-  { id: 'sessions', label: 'Sessões' }
+  { id: 'sessions', label: 'Sessões' },
+  { id: 'patterns', label: 'Padrões' }
 ]
 
 interface ClientFolder {
@@ -652,6 +654,16 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
                   {filteredProjects.length === 0 && <p>Nenhum projeto neste cliente. {canManage ? 'Crie um em Projetos.' : ''}</p>}
                 </div>
               </>
+            )}
+
+            {tab === 'patterns' && (
+              <ClientPatternsTab
+                clientId={client.id}
+                canManage={perms.canEdit}
+                userId={user?.id ?? null}
+                authorName={author}
+                formatDate={date}
+              />
             )}
 
             {tab === 'sessions' && (

@@ -45,6 +45,8 @@ import { AgentsScreen } from '@renderer/screens/AgentsScreen'
 import { ProjectsScreen } from '@renderer/screens/ProjectsScreen'
 import { ClientsScreen } from '@renderer/screens/ClientsScreen'
 import { extractAbapArtifacts, saveAbapArtifacts } from '@renderer/lib/abapDrive'
+import { formatPatternsContext, selectRelevantPatterns } from '@renderer/lib/codePatterns'
+import { useCodePatternsStore } from '@renderer/store/codePatternsStore'
 import { useTasksStore, type TaskItem, type TaskSubtask } from '@renderer/store/tasksStore'
 import { buildTaskExecutionPrompt } from '@renderer/lib/taskAssistant'
 import { FlowsScreen } from '@renderer/screens/FlowsScreen'
@@ -209,6 +211,17 @@ export function HomeScreen(): JSX.Element {
   const isStreaming = useChatRuntimeStore((state) =>
     currentChatId ? (state.runtimes[currentChatId]?.streaming ?? false) : false
   )
+  // Each ABAP block in this session can be approved as a pattern of the session's client.
+  useEffect(() => {
+    useCodePatternsStore
+      .getState()
+      .setScope(
+        currentClientId && currentModuleId
+          ? { clientId: currentClientId, moduleId: currentModuleId, chatId: currentChatId, streaming: isStreaming }
+          : null
+      )
+    return () => useCodePatternsStore.getState().setScope(null)
+  }, [currentClientId, currentModuleId, currentChatId, isStreaming])
   const messages = useMemo(
     () => (currentChatId ? (runtimeMessages ?? []) : draftMessages),
     [currentChatId, runtimeMessages, draftMessages]
@@ -649,6 +662,17 @@ export function HomeScreen(): JSX.Element {
       }
     }
 
+    // Approved code of this client (migration 046). A failure never blocks the request.
+    let patternsContext = ''
+    if (currentClientId) {
+      try {
+        const approved = await useCodePatternsStore.getState().load(currentClientId, true)
+        patternsContext = formatPatternsContext(selectRelevantPatterns(approved, text))
+      } catch {
+        patternsContext = ''
+      }
+    }
+
     const apiKey = await fetchApiKey(user.id, runProvider)
     if (!apiKey) {
       pushLocalError(`Chave de API do provedor ${selectedProviderDef?.name} não encontrada.`)
@@ -689,9 +713,9 @@ export function HomeScreen(): JSX.Element {
     let history: ChatTurn[] = messages.filter(message => !message.error && message.content.trim())
       .map((message, index) => ({ role: message.role, content: modelContent(message.content, String(index)), imageDataUrls: message.imageDataUrls }))
     const currentContent = modelContent(fullContent, String(messages.filter(message => !message.error && message.content.trim()).length))
-    history.push({ role: 'user', content: folderReference
+    history.push({ role: 'user', content: [folderReference
       ? `${currentContent}\n\n<contexto-drive>\n${folderReference.content}\n</contexto-drive>`
-      : currentContent, imageDataUrls: readyAttachments.flatMap(attachment => attachment.imageDataUrl ? [attachment.imageDataUrl] : []) })
+      : currentContent, patternsContext].filter(Boolean).join('\n\n'), imageDataUrls: readyAttachments.flatMap(attachment => attachment.imageDataUrl ? [attachment.imageDataUrl] : []) })
     const workspaceFiles = [...(folderReference?.files ?? []), ...attachmentFiles]
     const fileWorkspace = workspaceFiles.length || folderReference ? createFileWorkspace(workspaceFiles, 'Arquivos do cliente e anexos', async () => {
       if (useAuthStore.getState().user?.id !== user.id) throw new Error('A conta mudou durante a consulta dos arquivos.')

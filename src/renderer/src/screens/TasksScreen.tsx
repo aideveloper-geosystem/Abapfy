@@ -21,6 +21,7 @@ import {
   Settings2,
   Trash2,
   UserRound,
+  Users,
   WandSparkles,
   X
 } from 'lucide-react'
@@ -40,6 +41,16 @@ import { useChatStore } from '@renderer/store/chatStore'
 import { useSettingsStore } from '@renderer/store/settingsStore'
 import { useAuthStore } from '@renderer/store/authStore'
 import { suggestTaskDraft } from '@renderer/lib/taskAssistant'
+import {
+  Avatar,
+  AssigneeControl,
+  BoardActivityPanel,
+  BoardBar,
+  TaskActivityTabs,
+  usePeople
+} from './TaskBoardParts'
+import { useWorkspaceStore } from '@renderer/store/workspaceStore'
+import { isWorkspaceAdmin } from '@renderer/lib/workspaceAccess'
 import './TasksScreen.css'
 
 interface TaskActions {
@@ -61,6 +72,7 @@ const RECURRENCE_LABELS: Record<TaskRecurrence, string> = {
 
 function emptyForm(status: string): TaskInput {
   return {
+    assigneeId: '',
     clientId: '',
     moduleId: '',
     folderId: '',
@@ -105,6 +117,12 @@ function TaskCard({
   onOpen: () => void
 }): JSX.Element {
   const clientName = useClientsStore((state) => state.clients.find((client) => client.id === task.clientId)?.name)
+  const people = usePeople()
+  const presence = useTasksStore((state) => state.presence)
+  const viewers = task.boardId
+    ? presence.filter((item) => item.taskId === task.id && item.userId !== people.selfId)
+    : []
+  const mine = Boolean(task.boardId && task.assigneeId && task.assigneeId === people.selfId)
   const completed = task.subtasks.filter((item) => item.completed).length
   const overdue = Boolean(
     task.dueDate &&
@@ -121,7 +139,7 @@ function TaskCard({
   }
   return (
     <div
-      className="task-card"
+      className={`task-card${mine ? ' tb-mine' : ''}${task.boardId && !task.assigneeId ? ' tb-free' : ''}`}
       draggable
       onDragStart={handleDragStart}
       onDragOver={(event) => event.preventDefault()}
@@ -159,6 +177,33 @@ function TaskCard({
           {unresolvedDependencies.length > 1 ? 's' : ''}
         </div>
       )}
+      {task.boardId && (
+        <div className="tb-card-people">
+          <span className="tb-card-owner" title={people.nameOf(task.assigneeId)}>
+            <Avatar people={people} userId={task.assigneeId} />
+            {task.assigneeId ? people.nameOf(task.assigneeId) : 'Livre'}
+          </span>
+          {!task.assigneeId && (
+            <button
+              type="button"
+              className="tb-claim"
+              onClick={(event) => {
+                event.stopPropagation()
+                void useTasksStore.getState().claimTask(task.id)
+              }}
+            >
+              Assumir
+            </button>
+          )}
+          {viewers.length > 0 && (
+            <span className="tb-viewers" title={`${viewers.map((item) => item.name).join(', ')} vendo`}>
+              {viewers.slice(0, 3).map((item) => (
+                <Avatar key={item.userId} people={people} userId={item.userId} size={18} />
+              ))}
+            </span>
+          )}
+        </div>
+      )}
       <div className="task-card-meta">
         {task.dueDate && (
           <span className={overdue ? 'task-card-due task-card-due-overdue' : 'task-card-due'}>
@@ -166,7 +211,7 @@ function TaskCard({
             {formatDate(task.dueDate)}
           </span>
         )}
-        {task.assignee && (
+        {!task.boardId && task.assignee && (
           <span title={task.assignee}>
             <UserRound size={12} />
             {task.assignee}
@@ -212,6 +257,7 @@ function TaskModal({
   const [form, setForm] = useState<TaskInput>(() =>
     task
       ? {
+          assigneeId: task.assigneeId ?? '',
           clientId: task.clientId ?? '',
           moduleId: task.moduleId ?? '',
           folderId: task.folderId ?? '',
@@ -234,6 +280,29 @@ function TaskModal({
       : emptyForm(initialStatus)
   )
   const { clients, modules } = useClientsStore()
+  const people = usePeople()
+  const sharedBoard = useTasksStore((state) =>
+    state.boards.find((board) => board.id === state.activeBoardId) ?? null
+  )
+  const boards = useTasksStore((state) => state.boards)
+  const [moveTarget, setMoveTarget] = useState('')
+  async function handleMoveToBoard(): Promise<void> {
+    const board = boards.find((item) => item.id === moveTarget)
+    if (!task || !board) return
+    const ok = window.confirm(
+      `Mover “${task.title}” para o quadro “${board.name}”?
+
+A tarefa fica visível para todos os membros, sem responsável, e suas dependências do quadro pessoal são removidas. Não dá para trazê-la de volta.`
+    )
+    if (!ok) return
+    if (await useTasksStore.getState().moveTaskToBoard(task.id, board.id)) onClose()
+    else setFormError(useTasksStore.getState().error ?? 'Não foi possível mover a tarefa.')
+  }
+  useEffect(() => {
+    if (!task || !sharedBoard) return
+    useTasksStore.getState().trackPresence(task.id)
+    return () => useTasksStore.getState().trackPresence(null)
+  }, [task, sharedBoard])
   const [folders, setFolders] = useState<DriveFolder[]>([])
   const [formError, setFormError] = useState<string | null>(null)
   useEffect(() => {
@@ -447,13 +516,23 @@ function TaskModal({
                 onChange={(event) => setForm({ ...form, sapModule: event.target.value })}
               />
             </label>
-            <label>
-              <span>Responsável</span>
-              <input
-                value={form.assignee}
-                onChange={(event) => setForm({ ...form, assignee: event.target.value })}
+            {sharedBoard ? (
+              <AssigneeControl
+                task={task}
+                board={sharedBoard}
+                people={people}
+                value={form.assigneeId}
+                onChange={(assigneeId) => setForm((current) => ({ ...current, assigneeId }))}
               />
-            </label>
+            ) : (
+              <label>
+                <span>Responsável</span>
+                <input
+                  value={form.assignee}
+                  onChange={(event) => setForm({ ...form, assignee: event.target.value })}
+                />
+              </label>
+            )}
           </div>
           <label>
             <span>Labels, separadas por vírgula</span>
@@ -579,6 +658,22 @@ function TaskModal({
               criadas após salvar.
             </div>
           )}
+          {task && !sharedBoard && boards.length > 0 && (
+            <div className="tb-move">
+              <span>Compartilhar com a equipe</span>
+              <div>
+                <select value={moveTarget} onChange={(event) => setMoveTarget(event.target.value)} aria-label="Quadro em grupo de destino">
+                  <option value="">Mover para um quadro em grupo…</option>
+                  {boards.map((board) => (
+                    <option key={board.id} value={board.id}>{board.name}</option>
+                  ))}
+                </select>
+                <button type="button" className="task-secondary-button" disabled={!moveTarget} onClick={() => void handleMoveToBoard()}>
+                  <Users size={13} /> Mover
+                </button>
+              </div>
+            </div>
+          )}
           <div className="task-modal-actions">
             {task && (
               <button type="button" className="task-delete-button" onClick={handleDelete}>
@@ -605,6 +700,11 @@ function TaskModal({
               {liveTask.chatId && <button type="button" className="task-secondary-button" onClick={() => onOpenChat(liveTask.chatId!)}>Abrir sessão da tarefa</button>}
             </div>
             <p>O agente recebe o contexto do cliente e da pasta. Revise a entrega antes de marcar como concluída.</p>
+            {sharedBoard && (
+              <p className="tb-session-note">
+                Sessões ficam abertas a todo o workspace: quem abrir a tarefa pode acompanhar o chat vinculado.
+              </p>
+            )}
             <div className="task-subtasks-header">
               <span>Subtarefas</span>
               <span>
@@ -657,6 +757,7 @@ function TaskModal({
                 <Plus size={14} /> Adicionar
               </button>
             </form>
+            {sharedBoard && <TaskActivityTabs taskId={liveTask.id} people={people} columns={columns} />}
           </div>
         )}
       </div>
@@ -674,6 +775,9 @@ function ColumnManager({
   onClose: () => void
 }): JSX.Element {
   const { createColumn, updateColumn, moveColumn, deleteColumn } = useTasksStore()
+  const shared = useTasksStore((state) => Boolean(state.activeBoardId))
+  const workspaceRole = useWorkspaceStore((state) => state.workspace?.role)
+  const canDeleteColumns = !shared || isWorkspaceAdmin(workspaceRole)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [color, setColor] = useState('#0070f2')
@@ -739,7 +843,8 @@ function ColumnManager({
               </button>
               <button
                 type="button"
-                disabled={tasks.some((task) => task.status === column.key) || columns.length <= 1}
+                disabled={!canDeleteColumns || tasks.some((task) => task.status === column.key) || columns.length <= 1}
+                title={canDeleteColumns ? 'Excluir coluna' : 'Só proprietário ou administrador exclui colunas de quadros em grupo'}
                 onClick={async () => {
                   if (!window.confirm(`Excluir a coluna “${column.name}”?`)) return
                   if (!(await deleteColumn(column.id)))
@@ -849,17 +954,31 @@ export function TasksScreen({ onStartTask, onOpenChat }: TaskActions): JSX.Eleme
   const { clients } = useClientsStore()
   const [clientFilter, setClientFilter] = useState('')
   const { tasks, columns, loaded, loading, error, load, moveTask } = useTasksStore()
+  const activeBoardId = useTasksStore((state) => state.activeBoardId)
+  const people = usePeople()
+  const [mineFilter, setMineFilter] = useState<'all' | 'mine' | 'free'>('all')
+  const [activityOpen, setActivityOpen] = useState(false)
   const [modal, setModal] = useState<{ task: TaskItem | null; status: TaskStatus } | null>(null)
   const [columnManager, setColumnManager] = useState(false)
   const [view, setView] = useState<'board' | 'calendar' | 'list'>('board')
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
-  const visibleTasks = useMemo(() => tasks.filter((task) => (!clientFilter || (clientFilter === 'none' ? !task.clientId : task.clientId === clientFilter)) && (!statusFilter || task.status === statusFilter) &&
-    [task.title, task.description, task.sapModule, task.assignee, clients.find((client) => client.id === task.clientId)?.name, ...task.labels].some((value) => value?.toLocaleLowerCase('pt-BR').includes(query.trim().toLocaleLowerCase('pt-BR')))), [tasks, query, statusFilter, clientFilter, clients])
+  const visibleTasks = useMemo(() => tasks.filter((task) => (mineFilter === 'all' || (mineFilter === 'mine' ? task.assigneeId === people.selfId : !task.assigneeId)) && (!clientFilter || (clientFilter === 'none' ? !task.clientId : task.clientId === clientFilter)) && (!statusFilter || task.status === statusFilter) &&
+    [task.title, task.description, task.sapModule, task.assignee, task.assigneeId ? people.nameOf(task.assigneeId) : null, clients.find((client) => client.id === task.clientId)?.name, ...task.labels].some((value) => value?.toLocaleLowerCase('pt-BR').includes(query.trim().toLocaleLowerCase('pt-BR')))), [tasks, query, statusFilter, clientFilter, clients, mineFilter, people])
   const [month, setMonth] = useState(() => new Date())
   useEffect(() => {
     if (!loaded) void load()
   }, [loaded, load])
+  useEffect(() => {
+    if (!people.selfId) return
+    if (!useWorkspaceStore.getState().members.length) void useWorkspaceStore.getState().loadAdmin()
+  }, [people.selfId])
+  // Live updates while this screen is open; restarted whenever the board (and so the data) changes.
+  useEffect(() => {
+    if (!loaded || !people.selfId) return
+    useTasksStore.getState().startRealtime({ id: people.selfId, name: people.selfName })
+    return () => useTasksStore.getState().stopRealtime()
+  }, [loaded, activeBoardId, people.selfId, people.selfName])
   const byStatus = useMemo(
     () =>
       Object.fromEntries(
@@ -897,7 +1016,7 @@ export function TasksScreen({ onStartTask, onOpenChat }: TaskActions): JSX.Eleme
       <header className="tasks-header">
         <div>
           <h1>Gerenciamento de tarefas</h1>
-          <p>Seu quadro pessoal: organize entregas por cliente e execute tarefas com o agente.</p>
+          <p>{activeBoardId ? 'Quadro em grupo: todos veem as mudanças em tempo real, com responsável e histórico.' : 'Seu quadro pessoal: organize entregas por cliente e execute tarefas com o agente.'}</p>
         </div>
         <div className="tasks-header-actions">
           <button type="button" className="task-secondary-button" onClick={enableNotifications}>
@@ -931,6 +1050,14 @@ export function TasksScreen({ onStartTask, onOpenChat }: TaskActions): JSX.Eleme
           </button>
         </div>
       </header>
+      <BoardBar people={people} activityOpen={activityOpen} onToggleActivity={() => setActivityOpen((open) => !open)} />
+      {activeBoardId && (
+        <div className="tb-quick" role="group" aria-label="Filtrar por responsável">
+          <button type="button" aria-pressed={mineFilter === 'all'} onClick={() => setMineFilter('all')}>Todas</button>
+          <button type="button" aria-pressed={mineFilter === 'mine'} onClick={() => setMineFilter('mine')}>Minhas</button>
+          <button type="button" aria-pressed={mineFilter === 'free'} onClick={() => setMineFilter('free')}>Sem responsável</button>
+        </div>
+      )}
       <div className="tasks-filter-bar"><select aria-label="Filtrar por cliente" value={clientFilter} onChange={(event) => setClientFilter(event.target.value)}><option value="">Todos os clientes</option><option value="none">Sem cliente</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><label><Search size={14} /><input aria-label="Buscar tarefas" placeholder="Buscar tarefa, módulo ou responsável…" value={query} onChange={(event) => setQuery(event.target.value)} /></label><div aria-label="Filtrar tarefas por status"><button type="button" aria-pressed={!statusFilter} onClick={() => setStatusFilter(null)}>Todas <span>{tasks.length}</span></button>{columns.map((column) => <button type="button" key={column.id} aria-pressed={statusFilter === column.key} onClick={() => setStatusFilter(column.key)}>{column.name}<span>{tasks.filter((task) => task.status === column.key).length}</span></button>)}</div></div>
       <div className="tasks-result-count" role="status">{loading ? 'Carregando tarefas…' : `${visibleTasks.length} de ${tasks.length} tarefas`}</div>
       {error && (
@@ -951,7 +1078,7 @@ export function TasksScreen({ onStartTask, onOpenChat }: TaskActions): JSX.Eleme
           </button>
         </div>
       )}
-      {view === 'list' ? <div className="tasks-records"><table><thead><tr><th>Tarefa</th><th>Cliente</th><th>Status</th><th>Módulo</th><th>Responsável</th><th>Prazo</th><th>Subtarefas</th></tr></thead><tbody>{visibleTasks.map((task) => <tr key={task.id}><td><button type="button" onClick={() => setModal({ task, status: task.status })}>{task.title}</button></td><td>{clients.find((client) => client.id === task.clientId)?.name ?? 'Sem cliente'}</td><td>{columns.find((column) => column.key === task.status)?.name ?? 'Status indisponível'}</td><td>{task.sapModule || '—'}</td><td>{task.assignee || '—'}</td><td>{task.dueDate ? new Date(`${task.dueDate}T12:00:00`).toLocaleDateString('pt-BR') : 'Sem prazo'}</td><td>{task.subtasks.filter((item) => item.completed).length}/{task.subtasks.length}</td></tr>)}</tbody></table>{!visibleTasks.length && !loading && <p>Nenhuma tarefa corresponde aos filtros.</p>}</div> : view === 'calendar' ? (
+      {view === 'list' ? <div className="tasks-records"><table><thead><tr><th>Tarefa</th><th>Cliente</th><th>Status</th><th>Módulo</th><th>Responsável</th><th>Prazo</th><th>Subtarefas</th></tr></thead><tbody>{visibleTasks.map((task) => <tr key={task.id}><td><button type="button" onClick={() => setModal({ task, status: task.status })}>{task.title}</button></td><td>{clients.find((client) => client.id === task.clientId)?.name ?? 'Sem cliente'}</td><td>{columns.find((column) => column.key === task.status)?.name ?? 'Status indisponível'}</td><td>{task.sapModule || '—'}</td><td>{task.boardId ? (task.assigneeId ? people.nameOf(task.assigneeId) : '—') : task.assignee || '—'}</td><td>{task.dueDate ? new Date(`${task.dueDate}T12:00:00`).toLocaleDateString('pt-BR') : 'Sem prazo'}</td><td>{task.subtasks.filter((item) => item.completed).length}/{task.subtasks.length}</td></tr>)}</tbody></table>{!visibleTasks.length && !loading && <p>Nenhuma tarefa corresponde aos filtros.</p>}</div> : view === 'calendar' ? (
         <CalendarView
           tasks={visibleTasks}
           columns={columns}
@@ -1010,6 +1137,9 @@ export function TasksScreen({ onStartTask, onOpenChat }: TaskActions): JSX.Eleme
             </section>
           ))}
         </div>
+      )}
+      {activityOpen && activeBoardId && (
+        <BoardActivityPanel people={people} columns={columns} onClose={() => setActivityOpen(false)} />
       )}
       {modal && (
         <TaskModal

@@ -27,7 +27,8 @@ async function artifactId(scope: AbapDestination, artifact: AbapArtifact, index:
 }
 
 export async function saveAbapArtifacts(scope: AbapDestination, artifacts: AbapArtifact[], signal?: AbortSignal,
-  onSaved?: (name: string) => void): Promise<void> {
+  onSaved?: (name: string) => void): Promise<string[]> {
+  const ids: string[] = []
   const { data: auth, error: authError } = await supabase.auth.getUser()
   if (authError || auth.user?.id !== scope.userId) throw new Error('A sessão mudou antes do salvamento ABAP.')
   if (scope.folderId) {
@@ -38,6 +39,7 @@ export async function saveAbapArtifacts(scope: AbapDestination, artifacts: AbapA
   for (const [index, artifact] of artifacts.entries()) {
     signal?.throwIfAborted()
     const id = await artifactId(scope, artifact, index)
+    ids.push(id)
     const storagePath = `${scope.clientId}/${scope.moduleId}/${id}/original.abap`
     const { data: previous, error: lookupError } = await supabase.from('client_files').select('id').eq('id', id).maybeSingle()
     if (lookupError) throw new Error(lookupError.message)
@@ -62,4 +64,5 @@ export async function saveAbapArtifacts(scope: AbapDestination, artifacts: AbapA
     }
     onSaved?.(artifact.name)
   }
+  return ids
 }

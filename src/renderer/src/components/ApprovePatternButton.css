@@ -1,0 +1,93 @@
+.pattern-approve {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.pattern-approved {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-semantic-success);
+  font: 500 11px var(--font-text);
+}
+.pattern-notice {
+  color: var(--color-semantic-warning);
+  font: 11px var(--font-text);
+}
+.pattern-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: 340px;
+  max-width: 80vw;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  text-align: left;
+  white-space: normal;
+}
+.pattern-popover header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--color-ink);
+  font: 600 13px var(--font-text);
+}
+.pattern-popover label {
+  display: grid;
+  gap: 4px;
+}
+.pattern-popover label span {
+  color: var(--color-ink-muted);
+  font: 500 11px var(--font-text);
+}
+.pattern-popover input,
+.pattern-popover textarea {
+  width: 100%;
+  padding: 7px 9px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+  color: var(--color-ink);
+  font: 13px var(--font-text);
+}
+.pattern-hint {
+  margin: 0;
+  color: var(--color-ink-subtle);
+  font: 11px/1.45 var(--font-text);
+}
+.pattern-error {
+  margin: 0;
+  color: var(--color-semantic-danger);
+  font: 12px var(--font-text);
+}
+.pattern-close {
+  color: var(--color-ink-subtle);
+}
+.pattern-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.pattern-actions button {
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-hairline-strong);
+  color: var(--color-ink-muted);
+  font: 500 12px var(--font-text);
+}
+.pattern-actions .pattern-confirm {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+.pattern-actions .pattern-confirm:disabled {
+  opacity: 0.5;
+}

@@ -85,7 +85,7 @@ export function Markdown({
         }
       }
 
-      return <CodeBlock language={language} code={code} />
+      return <CodeBlock language={language} code={code} approvable />
     },
     code({ className, children, ...props }) {
       return (

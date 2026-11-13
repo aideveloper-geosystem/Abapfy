@@ -6,6 +6,24 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-13
+
+### Tarefas em grupo
+
+- Quadros de tarefas compartilhados por workspace, com cliente e projeto opcionais e membros escolhidos entre as pessoas do workspace. O quadro pessoal continua igual.
+- Responsável por pessoa, botão Assumir atômico (só a primeira pessoa leva), Liberar e filtros Minhas e Sem responsável.
+- Atualização em tempo real, pessoas online e quem está vendo cada card.
+- Histórico do quadro e da tarefa, e comentários por tarefa.
+- Exige a migração `044_shared_task_boards.sql`. Detalhes em `docs/tarefas-em-grupo.md`.
+- Mover uma tarefa pessoal para um quadro em grupo, preservando subtarefas e sessões (migração `045_move_task_to_board.sql`).
+
+### Biblioteca de padrões por cliente
+
+- Atalho **Aprovar** nos blocos ABAP do chat: o código aprovado é guardado na biblioteca do cliente e uma cópia vai para a pasta "Padrões aprovados" do drive.
+- O agente recebe os padrões aprovados mais relevantes do cliente a cada pedido e passa a seguir nomenclatura, tratamento de erros e BAPIs já usados.
+- Aba **Padrões** na página do cliente para buscar, editar, revogar e excluir.
+- Exige a migração `046_client_code_patterns.sql`. Detalhes em `docs/biblioteca-de-padroes.md`.
+
 ## [1.1.0] - 2026-11-12
 
 ### Workspaces e papéis

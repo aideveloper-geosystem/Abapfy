@@ -2,11 +2,14 @@ import { memo, useEffect, useRef, useState } from 'react'
 import { Check, Copy } from 'lucide-react'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { ApprovePatternButton } from './ApprovePatternButton'
 import './CodeBlock.css'
 
 interface CodeBlockProps {
   language?: string
   code: string
+  /** ABAP blocks of a chat reply can be approved as client patterns. */
+  approvable?: boolean
 }
 
 // O Markdown reprocessa a árvore inteira a cada delta da mensagem em
@@ -14,7 +17,7 @@ interface CodeBlockProps {
 // highlight do Prism (não é barato) de novo a cada pedacinho de texto novo
 // que chega, mesmo sem ter mudado uma linha. Com memo, só o bloco que está
 // de fato crescendo (dentro da cerca ``` sendo digitada) recalcula.
-export const CodeBlock = memo(function CodeBlock({ language, code }: CodeBlockProps): JSX.Element {
+export const CodeBlock = memo(function CodeBlock({ language, code, approvable = false }: CodeBlockProps): JSX.Element {
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
   const timerRef = useRef<number>()
@@ -34,10 +37,13 @@ export const CodeBlock = memo(function CodeBlock({ language, code }: CodeBlockPr
     <div className="code-block">
       <div className="code-block-header">
         <span className="code-block-lang">{language || 'text'} · {lines.length} {lines.length === 1 ? 'linha' : 'linhas'}</span>
+        <span className="code-block-actions">
+        {approvable && (language === 'abap' || language === 'sap-abap') && <ApprovePatternButton code={code} />}
         <button type="button" className="code-block-copy" onClick={handleCopy}>
           {copied ? <Check size={12} strokeWidth={2} /> : <Copy size={12} strokeWidth={1.75} />}
           {copied ? 'Copiado' : copyError ? 'Use Ctrl+C' : 'Copiar'}
         </button>
+        </span>
       </div>
       <SyntaxHighlighter
         language={language || 'text'}
