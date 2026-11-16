@@ -6,6 +6,21 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-16
+
+### Google Gemini
+
+- Novos modelos no catálogo: Gemini 4 Carbon, Gemini 4 Argon, Gemini 4 Hydrogen e Gemini 3.8 Flash. Exige a migração `047_gemini_4_models.sql`.
+- O Gemini 3.6 Flash passa a indicar na descrição que será descontinuado em 19/11/2026. Continua habilitado.
+- Preços dos modelos Gemini 4 e do 3.5 Flash-Lite nos seeds do Admin (bancos já existentes: ajustar na tela de Preços).
+- Correção: respostas em streaming do Gemini com várias partes por trecho não perdem mais texto, e partes de raciocínio ficam fora da resposta.
+- Correção: ferramentas (MCP, SAP ADT) com schemas JSON completos não geram mais erro HTTP 400 no Gemini. O schema é filtrado só para o Gemini; Claude e OpenAI não mudam.
+
+### Roteamento de agentes
+
+- Se o router não escolher agente, os módulos EFs e DTECs usam o agente padrão (`ef_consultant` e `dtec_consultant`), mantendo a geração do Word da EF.
+- Falhas do router passam a ser registradas no console (`[router]`).
+
 ## [1.1.1] - 2026-11-13
 
 ### Tarefas em grupo

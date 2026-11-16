@@ -73,5 +73,9 @@ values
   ('openai', 'gpt-5-codex', 'GPT-5 Codex', 0, 0, 'Preço não verificado — edite antes de confiar na estimativa.'),
   ('gemini', 'gemini-3.6-flash', 'Gemini 3.6 Flash', 0, 0, 'Preço não verificado — edite antes de confiar na estimativa.'),
   ('gemini', 'gemini-3.1-pro-preview', 'Gemini 3.1 Pro', 0, 0, 'Preço não verificado — edite antes de confiar na estimativa.'),
-  ('gemini', 'gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite', 0, 0, 'Preço não verificado — edite antes de confiar na estimativa.')
+  ('gemini', 'gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite', 0.30, 2.50, null),
+  ('gemini', 'gemini-4-carbon', 'Gemini 4 Carbon', 2.00, 10.00, 'Preço introdutório até 2026-11-30.'),
+  ('gemini', 'gemini-4-argon', 'Gemini 4 Argon', 2.00, 10.00, 'Preço introdutório até 2026-11-30.'),
+  ('gemini', 'gemini-4-hydrogen', 'Gemini 4 Hydrogen', 1.50, 7.50, null),
+  ('gemini', 'gemini-3.8-flash', 'Gemini 3.8 Flash', 0, 0, 'Preço não verificado — edite antes de confiar na estimativa.')
 on conflict (model_id) do nothing;

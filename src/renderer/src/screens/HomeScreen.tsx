@@ -816,6 +816,20 @@ export function HomeScreen(): JSX.Element {
         setIsRouting(false)
       }
 
+      // O router depende de chave Claude e falha em silêncio. Sem agente definido,
+      // módulos dedicados usam o agente padrão correspondente (EF gera o Word).
+      if (!agent) {
+        const moduleDefaultId =
+          currentModuleId === 'efs' ? 'ef_consultant' : currentModuleId === 'dtecs' ? 'dtec_consultant' : null
+        const fallbackAgent = moduleDefaultId
+          ? availableAgents.find((item) => item.source === 'default' && item.id === moduleDefaultId)
+          : undefined
+        if (fallbackAgent) {
+          agent = { source: fallbackAgent.source, id: fallbackAgent.id, name: fallbackAgent.name }
+          prompt = fallbackAgent.content
+        }
+      }
+
       const routedSkillNames = skills
         .filter((skill) => skillIds.includes(skill.slug))
         .map((skill) => skill.name)

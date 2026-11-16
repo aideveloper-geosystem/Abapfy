@@ -845,6 +845,54 @@ async function runClaude(
   return executions
 }
 
+const GEMINI_SCHEMA_KEYS = new Set([
+  'type', 'format', 'description', 'nullable', 'enum', 'properties', 'required',
+  'items', 'minItems', 'maxItems', 'minimum', 'maximum', 'anyOf', 'title'
+])
+
+/**
+ * Gemini aceita só um subconjunto de OpenAPI/JSON Schema em function_declarations
+ * (rejeita `examples`, `additionalProperties`, `$schema`, `default` etc.).
+ * Usado apenas no caminho Gemini; Claude/OpenAI recebem o schema original.
+ */
+function geminiSchema(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(geminiSchema)
+  if (!node || typeof node !== 'object') return node
+  const source = node as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(source)) {
+    if (!GEMINI_SCHEMA_KEYS.has(key)) continue
+    if (key === 'properties' && value && typeof value === 'object') {
+      out.properties = Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([name, child]) => [name, geminiSchema(child)])
+      )
+    } else if (key === 'type' && Array.isArray(value)) {
+      const types = value.filter((item) => item !== 'null')
+      out.type = types[0] ?? 'string'
+      if (value.includes('null')) out.nullable = true
+    } else if (key === 'items' || key === 'anyOf') {
+      out[key] = geminiSchema(value)
+    } else {
+      out[key] = value
+    }
+  }
+  if (source.const !== undefined && out.enum === undefined) out.enum = [source.const]
+  if (Array.isArray(out.required) && out.properties && typeof out.properties === 'object') {
+    const names = new Set(Object.keys(out.properties as object))
+    out.required = (out.required as unknown[]).filter((name) => typeof name === 'string' && names.has(name))
+    if ((out.required as unknown[]).length === 0) delete out.required
+  }
+  return out
+}
+
+function geminiParameters(schema: unknown): Record<string, unknown> | undefined {
+  const cleaned = geminiSchema(schema) as Record<string, unknown> | undefined
+  const properties = cleaned?.properties as Record<string, unknown> | undefined
+  // Gemini rejeita OBJECT sem propriedades: ferramenta sem argumentos omite `parameters`.
+  if (!cleaned || !properties || Object.keys(properties).length === 0) return undefined
+  return { ...cleaned, type: 'object' }
+}
+
 async function runGemini(
   args: RunMcpArgs,
   configs: McpServerConfig[],
@@ -886,7 +934,9 @@ async function runGemini(
                 functionDeclarations: tools.map((tool) => ({
                   name: tool.qualifiedName,
                   description: `[${tool.serverName}] ${tool.description}`,
-                  parameters: tool.inputSchema
+                  ...(geminiParameters(tool.inputSchema)
+                    ? { parameters: geminiParameters(tool.inputSchema) }
+                    : {})
                 }))
               }
             ]

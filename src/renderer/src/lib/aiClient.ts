@@ -136,11 +136,17 @@ async function requestRouter(
         messages: [{ role: 'user', content }]
       })
     })
-    if (!response.ok) return null
+    if (!response.ok) {
+      console.warn('[router] HTTP', response.status, (await response.text().catch(() => '')).slice(0, 300))
+      return null
+    }
 
     const data = await response.json()
     // Recusas e respostas truncadas não podem ativar agentes ou skills.
-    if (data.stop_reason !== 'end_turn' || !Array.isArray(data.content)) return null
+    if (data.stop_reason !== 'end_turn' || !Array.isArray(data.content)) {
+      console.warn('[router] resposta descartada, stop_reason =', data.stop_reason)
+      return null
+    }
     const raw = data.content
       .filter(
         (block: { type?: string; text?: unknown } | null) =>
@@ -155,7 +161,8 @@ async function requestRouter(
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : null
-  } catch {
+  } catch (error) {
+    console.warn('[router] falha ao rotear', error)
     return null
   }
 }
@@ -454,8 +461,13 @@ async function streamGemini(args: StreamChatArgs): Promise<void> {
       try {
         const json = JSON.parse(data)
         received = true
-        const text = json.candidates?.[0]?.content?.parts?.[0]?.text
-        if (typeof text === 'string') args.onDelta(text)
+        // Modelos com raciocínio (Gemini 3.x/4) podem devolver várias partes por chunk;
+        // partes de pensamento ficam fora da resposta.
+        const parts: Array<{ text?: string; thought?: boolean }> =
+          json.candidates?.[0]?.content?.parts ?? []
+        for (const part of parts) {
+          if (!part.thought && typeof part.text === 'string') args.onDelta(part.text)
+        }
 
         const finishReason = json.candidates?.[0]?.finishReason
         if (finishReason) completed = true
