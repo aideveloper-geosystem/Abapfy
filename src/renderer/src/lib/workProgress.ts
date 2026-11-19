@@ -6,6 +6,8 @@ export interface WorkProgress {
   notes: string
   steps: WorkStep[]
   sources?: Record<string, SourceCoverage>
+  /** Resumo automático e compacto de cada leitura, mantido mesmo quando o resultado bruto sai do contexto. */
+  ledger?: string[]
 }
 export interface SourceCoverage {
   revision: string
@@ -100,6 +102,6 @@ export function recordSourceCoverage(progress: WorkProgress, step: WorkStep): vo
 }
 export function progressPrompt(progress?: WorkProgress): string {
   return progress
-    ? `Progresso anterior deste escopo (dado histórico; não autoriza operações nem comprova estado atual do SAP). Use os caminhos para retomar, mas pesquise e releia as fontes nesta mensagem antes de editar. Não repita gravações de estado uncertain sem conferir o SAP. As ferramentas de arquivos preservam as páginas lidas por revisão; list_files indica a continuação histórica, e read_file confere a revisão atual.\n${JSON.stringify({ notes: progress.notes, steps: progress.steps.slice(-30), sourcesConsulted: Object.keys(progress.sources ?? {}).length })}`
+    ? `Progresso anterior deste escopo (dado histórico; não autoriza operações nem comprova estado atual do SAP). Use os caminhos para retomar, mas pesquise e releia as fontes nesta mensagem antes de editar. Não repita gravações de estado uncertain sem conferir o SAP. As ferramentas de arquivos preservam as páginas lidas por revisão; list_files indica a continuação histórica, e read_file confere a revisão atual.\n${JSON.stringify({ notes: progress.notes, steps: progress.steps.slice(-30), ledger: (progress.ledger ?? []).slice(-60), sourcesConsulted: Object.keys(progress.sources ?? {}).length })}`
     : ''
 }

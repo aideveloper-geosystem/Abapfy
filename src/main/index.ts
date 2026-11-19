@@ -23,6 +23,9 @@ import { readMcpLocalConfig, saveMcpLocalCatalog, saveMcpLocalServerConfig, type
 let mainWindow: BrowserWindow | null = null
 const approvedStdioConfigs = new Set<string>()
 const pendingStdioApprovals = new Map<string, Promise<boolean>>()
+// Aprovação de ferramenta MCP vale pela sessão do app (servidor + ferramenta +
+// configuração inalterada), em vez de perguntar a cada chamada.
+const approvedMcpTools = new Set<string>()
 const mainDirectory = dirname(fileURLToPath(import.meta.url))
 const icon = join(mainDirectory, '../../resources/abapfy-horizon-mark.png')
 
@@ -156,7 +159,7 @@ function requestMcpConfirmation(request: McpConfirmationRequest): Promise<boolea
   surfaceMainWindow()
   if (!mainWindow) return Promise.resolve(false)
   return new Promise<boolean>((resolve) => {
-    const timeout = setTimeout(() => resolveMcpConfirmation(request.callId, false), 120_000)
+    const timeout = setTimeout(() => resolveMcpConfirmation(request.callId, false), 600_000)
     pendingConfirmations.set(request.callId, (approved) => { clearTimeout(timeout); resolve(approved) })
     mainWindow?.webContents.send('mcp:confirmation-pending', request)
   })
@@ -197,6 +200,7 @@ function registerMcpIpc(): void {
   ipcMain.handle('mcp:closeAll', async () => {
     for (const callId of pendingConfirmations.keys()) resolveMcpConfirmation(callId, false)
     approvedStdioConfigs.clear()
+    approvedMcpTools.clear()
     pendingStdioApprovals.clear()
     await closeMcpClients()
   })
@@ -241,16 +245,21 @@ function registerMcpIpc(): void {
     ) => {
       await ensureMcpStartupApproved(config)
       if (mcpToolRequiresConfirmation(config.id, toolName)) {
-        const resolvedCallId = callId ?? `${config.id}-${toolName}-${Date.now()}`
-        const approved = await requestMcpConfirmation({
-          callId: resolvedCallId,
-          kind: 'tool',
-          serverName: config.name,
-          toolName,
-          detail: `Esta ferramenta pode alterar dados. Confira o servidor/perfil e os argumentos antes de autorizar.\n\nConfiguração: ${config.command ?? config.url ?? ''} ${config.args.join(' ')}\n\nArgumentos: ${JSON.stringify(args, null, 2)}`
-        })
-        if (!approved) {
-          return { isError: true, error: 'Chamada MCP recusada pelo usuário.' }
+        const toolKey = JSON.stringify([config.id, toolName, config.command, config.args, config.cwd, config.url, config.env])
+        if (!approvedMcpTools.has(toolKey)) {
+          const resolvedCallId = callId ?? `${config.id}-${toolName}-${Date.now()}`
+          const approved = await requestMcpConfirmation({
+            callId: resolvedCallId,
+            kind: 'tool',
+            scope: 'session',
+            serverName: config.name,
+            toolName,
+            detail: `Esta ferramenta pode alterar dados. Confira o servidor/perfil e os argumentos antes de autorizar. A autorização vale para esta ferramenta até fechar o aplicativo.\n\nConfiguração: ${config.command ?? config.url ?? ''} ${config.args.join(' ')}\n\nArgumentos: ${JSON.stringify(args, null, 2)}`
+          })
+          if (!approved) {
+            return { isError: true, error: 'Chamada MCP recusada pelo usuário.' }
+          }
+          approvedMcpTools.add(toolKey)
         }
       }
       return callMcpTool(config, toolName, args, callId)

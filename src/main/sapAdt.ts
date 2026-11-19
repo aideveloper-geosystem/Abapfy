@@ -47,7 +47,11 @@ type Confirmation = (request: {
   toolName: string
   detail: string
 }) => Promise<boolean>
+// Turn expira só por inatividade: relatórios longos (>10 min) não podem perder
+// a autorização SAP no meio da tarefa.
+const TURN_IDLE_MS = 45 * 60_000
 interface Turn {
+  id: string
   sessionId: string
   userId: string
   token: string
@@ -412,6 +416,8 @@ export async function executeSapAdtTool(
 ): Promise<unknown> {
   const turn = turns.get(turnId)
   if (!turn) throw new Error('A autorização SAP desta mensagem expirou.')
+  clearTimeout(turn.timer)
+  turn.timer = setTimeout(() => endSapAdtTurn(turn.id), TURN_IDLE_MS)
   z.string().min(1).max(150).parse(callId)
   const tool = turn.tools.find((item) => item.qualifiedName === qualifiedName)
   if (!tool) throw new Error('Ferramenta SAP não autorizada para esta mensagem.')
@@ -421,7 +427,7 @@ export async function executeSapAdtTool(
   const signal = AbortSignal.any([
     turn.controller.signal,
     controller.signal,
-    AbortSignal.timeout(90000)
+    AbortSignal.timeout(180000)
   ])
   const onAbort = (): void => cancelConfirmation(callId)
   signal.addEventListener('abort', onAbort, { once: true })
@@ -439,10 +445,9 @@ export async function executeSapAdtTool(
       signal.throwIfAborted()
       const action = (input as Record<string, unknown>)?.action
       if (tool.name === 'debug' && ['wait', 'stack', 'variables'].includes(String(action))) return
-      const key =
-        JSON.stringify([turn.userId, connection.id]) +
-        ':' +
-        JSON.stringify([turn.sessionId, turn.agent.source, turn.agent.id])
+      // Consentimento vale para a conversa inteira nesta conexão, inclusive
+      // subagentes delegados — não pergunta de novo a cada agente.
+      const key = JSON.stringify([turn.userId, connection.id]) + ':' + JSON.stringify([turn.sessionId])
       const signature = JSON.stringify(connection)
       const reusable = action !== 'acknowledge_cleanup'
       if (reusable && sessionApprovals.get(key) === signature) return
@@ -460,7 +465,7 @@ export async function executeSapAdtTool(
           '\nAmbiente: ' +
           connection.environment +
           (reusable
-            ? '\n\nAutorizar operações de alteração/execução no SAP durante esta sessão de conversa, nesta conexão e para este agente. Leituras não exigem confirmação.\n\nPrimeira operação:\n'
+            ? '\n\nAutorizar operações de alteração/execução no SAP durante esta sessão de conversa, nesta conexão. Leituras não exigem confirmação.\n\nPrimeira operação:\n'
             : '\n\n') +
           detail
       })
@@ -808,8 +813,9 @@ export function registerSapAdtIpc(
         controller = new AbortController()
       const conversationId =
         sessionId === undefined ? id : z.string().min(1).max(200).parse(sessionId)
-      const timer = setTimeout(() => endSapAdtTurn(id), 600000)
+      const timer = setTimeout(() => endSapAdtTurn(id), TURN_IDLE_MS)
       turns.set(id, {
+        id,
         sessionId: conversationId,
         userId,
         token,

@@ -265,6 +265,8 @@ export async function runAdvancedAgentFlow(args: FlowArgs): Promise<string | nul
                   answer = text
                 },
                 onThinking: undefined,
+                onNarration: undefined,
+                readCache: undefined,
                 onProgress: undefined,
                 progress: undefined,
                 currentProgress: undefined,

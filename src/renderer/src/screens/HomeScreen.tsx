@@ -961,6 +961,7 @@ export function HomeScreen(): JSX.Element {
     let totalOutputTokens = 0
     let iterationHistory = history
     let finished = false
+    const narrated: string[] = []
     let streamFailed = false
     const sessionActivity: ToolActivityItem = {id:'agent-session',label:'Sessão · executando a tarefa',kind:'document',status:'running'}
     toolActivity.push(sessionActivity); pushToolActivity()
@@ -1105,7 +1106,19 @@ export function HomeScreen(): JSX.Element {
                 else if(!old) toolActivity.push({id,label:event.type==='call'?`Web · ${event.name}`:event.type==='citation'?event.title:'Web · resultado recebido',kind:event.type==='citation'?'source':'web',status:event.type==='call'?'running':'done',url:'url' in event?event.url:undefined})
                 pushToolActivity()
               },
-              onAnswer: text => { accumulated = text; finished = true; flushContent() },
+              onAnswer: text => {
+                // Preserva as mensagens parciais já exibidas: a resposta final entra depois delas.
+                accumulated = narrated.length ? `${narrated.join('\n\n')}\n\n---\n\n${text}` : text
+                finished = true
+                flushContent()
+              },
+              onNarration: advancedConfig ? undefined : text => {
+                const part = text.trim()
+                if (!part) return
+                narrated.push(part)
+                accumulated += (accumulated ? '\n\n' : '') + part
+                flushContent()
+              },
               onUsage: (input, output) => { totalInputTokens += input; totalOutputTokens += output },
               onThinking: event => {
                 if (event.type === 'delta') { thinkingText += event.text; scheduleRender(); return }
@@ -1133,6 +1146,11 @@ export function HomeScreen(): JSX.Element {
             })
             if (advancedConfig && !finished) throw new Error('O fluxo atingiu um limite sem concluir a resposta. Confira as atividades e as pendências antes de retomar.')
             if (mcpEvidence) runtimePrompt = `${runtimePrompt ?? ''}\n\n---\n\n${mcpEvidence}`
+            if (narrated.length && !finished) {
+              runtimePrompt = `${runtimePrompt ?? ''}\n\n---\n\n## Mensagens parciais já exibidas ao usuário\n${narrated.join('\n\n')}\n\nO usuário já leu as mensagens acima. Não as repita. Escreva apenas o fechamento: itens que ficaram pendentes ou não foram encontrados, lacunas de evidência e conclusões que cruzam itens. Se tudo já foi coberto, seja breve.`
+              accumulated += '\n\n---\n\n'
+              flushContent()
+            }
           } catch (mcpError) {
             if (advancedConfig || (mcpError as Error).name === 'AbortError' || mcpError instanceof ProviderRequestError || transientProviderError(mcpError)) throw mcpError
             runtimePrompt = `${runtimePrompt ?? ''}\n\n---\n\n## Falha nas integrações nesta interação\nNão foi possível consultar as ferramentas configuradas: ${(mcpError as Error).message}. Informe essa limitação ao usuário e não apresente dados das integrações como verificados.`

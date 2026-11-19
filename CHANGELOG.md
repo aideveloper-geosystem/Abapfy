@@ -6,6 +6,21 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-19
+
+### Autorizações
+
+- A autorização das ferramentas SAP ADT agora vale por conexão durante toda a sessão do chat, sem repetir o pedido por agente ou por ferramenta.
+- Servidores MCP autorizados ficam lembrados até o app fechar; o tempo de espera do cartão de confirmação passou de 2 para 10 minutos.
+- Correção: a autorização SAP não expira mais no meio de relatórios longos (timer fixo de 10 minutos trocado por inatividade de 45 minutos).
+
+### Agente com ferramentas
+
+- Leituras SAP somente de consulta rodam em paralelo (até 4) e leituras idênticas são reaproveitadas do cache.
+- O agente passa a escrever o resultado de cada item conforme as ferramentas respondem, em vez de falar só no final.
+- Correção: os trechos já exibidos não somem mais quando a resposta final chega; o fechamento é acrescentado depois deles.
+- Registro automático compacto de cada leitura SAP e checkpoint com `append`, para não perder contexto em tarefas longas.
+
 ## [1.2.0] - 2026-11-16
 
 ### Google Gemini
