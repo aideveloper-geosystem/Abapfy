@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerSapAdtIpc, closeSapAdt } from './sapAdt'
+import { registerAntigravityIpc, closeAntigravity } from './antigravity'
 import { setupAutoUpdater } from './updater'
 import { openGeneratedDocx } from './documentFiles'
 import { registerLocalFeatures, closeLocalFeatures } from './localFeatures'
@@ -300,6 +301,7 @@ app.whenReady().then(() => {
   registerDocumentIpc()
   registerLocalFeatures(() => mainWindow)
   registerMcpIpc()
+  registerAntigravityIpc(() => mainWindow)
   registerSapAdtIpc(() => mainWindow, requestMcpConfirmation, (id) => resolveMcpConfirmation(id, false))
   createWindow()
 
@@ -323,5 +325,6 @@ app.on('before-quit', (event) => {
   if (sapShutdownComplete) return
   event.preventDefault()
   closeLocalFeatures()
+  closeAntigravity()
   void Promise.allSettled([closeSapAdt(), closeMcpClients()]).finally(() => { sapShutdownComplete = true; app.quit() })
 })

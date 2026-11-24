@@ -80,6 +80,8 @@ import { agentRefinementContract } from '@renderer/lib/agentRefinements'
 import { AI_PROVIDERS } from '@renderer/lib/aiProviders'
 import { claudeGeneration } from '@renderer/lib/claudeModels'
 import { useAiModelsStore } from '@renderer/store/aiModelsStore'
+import { useAntigravityStore } from '@renderer/store/antigravityStore'
+import { useEffectiveModel } from '@renderer/lib/effectiveModel'
 import { NewsScreen } from '@renderer/screens/NewsScreen'
 import { runMcpToolLoop, type RunMcpArgs } from '@renderer/lib/mcpRuntime'
 import { runAdvancedAgentFlow } from '@renderer/lib/advancedFlowRuntime'
@@ -96,6 +98,7 @@ import {
   routeConversation,
   routeSkills,
   streamChat,
+  summarizeWithAntigravity,
   type ChatTurn,
   type ClaudeEffort,
   type StreamFinishInfo
@@ -238,7 +241,10 @@ export function HomeScreen(): JSX.Element {
   const { config: advancedFlowConfig, flows: savedFlows, enabled: flowsEnabled, selectedId: selectedFlowId, select: selectSavedFlow, userId: advancedFlowOwner, load: loadAdvancedFlow } = useAdvancedFlowStore()
   const [advancedFlowSelected, setAdvancedFlowSelected] = useState(false)
   useEffect(() => { setAdvancedFlowSelected(false); if (user?.id) loadAdvancedFlow(user.id) }, [user?.id, loadAdvancedFlow])
-  const advancedFlowEnabled = advancedFlowOwner === user?.id && flowsEnabled && advancedFlowConfig.enabled
+  const { provider: defaultProvider, model: defaultModel, antigravity: antigravityActive } = useEffectiveModel()
+  const antigravityStatus = useAntigravityStore((state) => state.status)
+  // Fluxos avançados escolhem provedores por API; com o Antigravity ligado ficam desativados.
+  const advancedFlowEnabled = !antigravityActive && advancedFlowOwner === user?.id && flowsEnabled && advancedFlowConfig.enabled
   const { models: managedModels, blocks: modelBlocks, load: loadModels } = useAiModelsStore()
   useEffect(() => { if (user) void loadModels() }, [user, loadModels])
   const chatScope: WorkScope | null = currentClientId && currentModuleId && (currentChatId || (view === 'chat' && (selectedFolderId || input.trim() || attachments.length > 0)))
@@ -261,10 +267,8 @@ export function HomeScreen(): JSX.Element {
       setCurrentModuleId(modules[0].id)
     }
   }, [clients, modules, currentChatId, currentClientId])
-  const { apiKeys, defaultProvider, defaultModel, setDefaultModel, aiPreferences } = useSettingsStore((state) => ({
+  const { apiKeys, setDefaultModel, aiPreferences } = useSettingsStore((state) => ({
     apiKeys: state.apiKeys,
-    defaultProvider: state.defaultProvider,
-    defaultModel: state.defaultModel,
     setDefaultModel: state.setDefaultModel,
     aiPreferences: state.aiPreferences
   }))
@@ -343,7 +347,13 @@ export function HomeScreen(): JSX.Element {
 
   const availableModels = useMemo(
     () =>
-      AI_PROVIDERS.filter((provider) => apiKeys[provider.id]?.configured).flatMap((provider) =>
+      antigravityActive
+        ? (antigravityStatus?.models ?? []).map((model) => ({
+            provider: 'antigravity' as const,
+            providerName: 'Antigravity',
+            model: { id: model.id, label: model.label, description: 'Modelo Gemini do Antigravity IDE' }
+          }))
+        : AI_PROVIDERS.filter((provider) => apiKeys[provider.id]?.configured).flatMap((provider) =>
         managedModels.filter((model) => model.provider === provider.id && model.enabled &&
           !modelBlocks.some((block) => block.user_id === user?.id && block.provider === model.provider && block.model_id === model.model_id)).map((model) => ({
           provider: provider.id,
@@ -351,12 +361,13 @@ export function HomeScreen(): JSX.Element {
           model: { id: model.model_id, label: model.label, description: model.description }
         }))
       ),
-    [apiKeys, managedModels, modelBlocks, user?.id]
+    [antigravityActive, antigravityStatus, apiKeys, managedModels, modelBlocks, user?.id]
   )
 
   const selectedProviderDef = defaultProvider
     ? AI_PROVIDERS.find((item) => item.id === defaultProvider)
     : undefined
+  const selectedProviderName = antigravityActive ? 'Antigravity' : selectedProviderDef?.name
   const selectedModelDef = availableModels.find((item) => item.provider === defaultProvider && item.model.id === defaultModel)?.model
   const supportsSelectedEffort = defaultProvider === 'claude' && !!selectedModelDef && claudeGeneration(selectedModelDef.id) !== 'legacy'
   const effortIndex = CLAUDE_EFFORT_LEVELS.indexOf(claudeEffort)
@@ -367,7 +378,8 @@ export function HomeScreen(): JSX.Element {
     else if (next !== 'max') setShowMaxEffortBurst(false)
     setClaudeEffort(next)
   }
-  const routerAllowed = managedModels.some((model) => model.provider === 'claude' && model.model_id === ROUTER_MODEL && model.enabled &&
+  // O router é Claude por API: fica fora quando o Antigravity substitui as APIs.
+  const routerAllowed = !antigravityActive && managedModels.some((model) => model.provider === 'claude' && model.model_id === ROUTER_MODEL && model.enabled &&
     !modelBlocks.some((block) => block.user_id === user?.id && block.provider === 'claude' && block.model_id === ROUTER_MODEL))
 
   const contextKey = user && currentChatId ? `${user.id}:${currentChatId}` : ''
@@ -399,6 +411,16 @@ export function HomeScreen(): JSX.Element {
     return key
   }
 
+  // Com o Antigravity ligado o resumo do contexto usa o mesmo modelo Gemini do chat.
+  function antigravitySummarizer(signal: AbortSignal): Parameters<typeof prepareContext>[0]['summarizer'] {
+    const model = defaultModel
+    if (!antigravityActive || !model) return undefined
+    return {
+      model,
+      request: (system, content) => summarizeWithAntigravity({ model, system, content, signal })
+    }
+  }
+
   async function handleCompact(): Promise<void> {
     if (!user || !currentChatId || isStreaming) { setModelChoiceError('Abra uma conversa e aguarde a resposta antes de compactar.'); return }
     const chatId = currentChatId, userId = user.id, rt = useChatRuntimeStore.getState()
@@ -412,7 +434,7 @@ export function HomeScreen(): JSX.Element {
       const countKey = defaultProvider === 'claude' ? await fetchApiKey(userId, 'claude') : null
       const result = await prepareContext({ userId, chatId, messages: turns, prompt: systemPrompt ?? '', settings: status.settings.compaction, signal: controller.signal, force: true, isCurrentUser: () => useAuthStore.getState().user?.id === userId,
         countTokens: countKey && defaultModel ? (messages, prompt) => countClaudeContext({ apiKey: countKey, model: defaultModel!, messages, prompt, signal: controller.signal }) : undefined,
-        authorizeRouter: () => authorizeCompactionRouter(userId), onProgress: (label) => { activity.label = label; rt.updateMessage(chatId, id, { toolActivity: [{ ...activity }] }) } })
+        authorizeRouter: () => authorizeCompactionRouter(userId), summarizer: antigravitySummarizer(controller.signal), onProgress: (label) => { activity.label = label; rt.updateMessage(chatId, id, { toolActivity: [{ ...activity }] }) } })
       activity.status = 'done'; activity.label = result.changed ? 'Contexto compactado · histórico original preservado' : result.warning ?? 'Contexto já compactado'
       if (result.changed && result.snapshot) activity.compaction = { beforeTokens: result.snapshot.beforeTokens, afterTokens: result.snapshot.afterTokens, coveredCount: result.snapshot.coveredCount, model: result.snapshot.model, summary: result.snapshot.summary }
     } catch (error) { activity.status = 'error'; activity.label = controller.signal.aborted || (error as Error).name === 'AbortError' ? 'Compactação cancelada · histórico preservado' : (error as Error).message }
@@ -529,7 +551,7 @@ export function HomeScreen(): JSX.Element {
     // está sendo gerada.
     if (!useChatRuntimeStore.getState().runtimes[chatId]) {
       const persisted = await loadChatMessages(chatId)
-      const providerName = AI_PROVIDERS.find((p) => p.id === meta?.provider)?.name
+      const providerName = meta?.provider === 'antigravity' ? 'Antigravity' : AI_PROVIDERS.find((p) => p.id === meta?.provider)?.name
 
       useChatRuntimeStore.getState().ensure(
         chatId,
@@ -623,11 +645,16 @@ export function HomeScreen(): JSX.Element {
 
     if (!runProvider || !runModel || !user) {
       pushLocalError(
-        'Nenhum modelo padrão configurado. Abra Configurações → Inteligência Artificial.'
+        antigravityActive
+          ? 'Antigravity ligado, mas sem modelo Gemini disponível. Abra o Antigravity IDE, faça login e confira Configurações → Integrações → Antigravity.'
+          : 'Nenhum modelo padrão configurado. Abra Configurações → Inteligência Artificial.'
       )
       return
     }
-    const { data: modelAllowed, error: modelAccessError } = await supabase.rpc('can_use_ai_model', { p_provider: runProvider, p_model_id: runModel })
+    // O Antigravity usa o login do IDE do próprio usuário: não há modelo gerenciado nem chave no Supabase.
+    const { data: modelAllowed, error: modelAccessError } = runProvider === 'antigravity'
+      ? { data: true, error: null }
+      : await supabase.rpc('can_use_ai_model', { p_provider: runProvider, p_model_id: runModel })
     if (modelAccessError || !modelAllowed) {
       pushLocalError('Este modelo está desativado ou bloqueado para seu usuário. Escolha outro modelo em Configurações → Inteligência Artificial.')
       void loadModels()
@@ -906,7 +933,7 @@ export function HomeScreen(): JSX.Element {
       id: assistantId,
       role: 'assistant',
       content: '',
-      providerLabel: advancedConfig ? runProvider : selectedProviderDef?.name,
+      providerLabel: advancedConfig ? runProvider : selectedProviderName,
       modelLabel: advancedConfig ? runModel ?? undefined : selectedModelDef?.label,
       effortLabel: runProvider === 'claude' ? CLAUDE_EFFORT_LABELS_PT[advancedConfig?.orchestrator.effort ?? claudeEffort] : undefined,
       agentName: agent?.name,
@@ -983,6 +1010,7 @@ export function HomeScreen(): JSX.Element {
           signal: controller.signal, isCurrentUser: () => useAuthStore.getState().user?.id === user!.id,
           countTokens: runProvider === 'claude' ? (messages, prompt) => countClaudeContext({ apiKey: apiKey!, model: runModel!, messages, prompt, signal: controller.signal }) : undefined,
           authorizeRouter: () => authorizeCompactionRouter(user!.id),
+          summarizer: antigravitySummarizer(controller.signal),
           onProgress: (label) => {
             compactionAttempted = true
             step ??= { id: `compact-${toolActivity.length}`, kind: 'compact', status: 'running', label }
@@ -1765,7 +1793,11 @@ export function HomeScreen(): JSX.Element {
                   title={selectedModelDef ? `${selectedModelDef.label}${supportsSelectedEffort ? ` · ${CLAUDE_EFFORT_LABELS_PT[claudeEffort]}` : ''}` : 'Selecionar modelo'}
                   aria-haspopup="dialog"
                   aria-expanded={modelMenuOpen}
-                  onClick={() => setModelMenuOpen((open) => !open)}
+                  onClick={() => {
+                    // A lista de modelos do Antigravity vem do IDE: atualiza ao abrir o menu.
+                    if (antigravityActive && !modelMenuOpen) void useAntigravityStore.getState().refresh()
+                    setModelMenuOpen((open) => !open)
+                  }}
                 >
                   <span>
                     {advancedFlowEnabled && advancedFlowSelected ? `Orquestrador · ${advancedFlowConfig.orchestrator.model}` : selectedModelDef
@@ -1839,7 +1871,9 @@ export function HomeScreen(): JSX.Element {
                           className={`home-model-menu-item ${selected ? 'home-model-menu-item-active' : ''}`}
                           title={model.description || model.label}
                           onClick={() => {
-                            void setDefaultModel(provider, model.id).catch((cause) => {
+                            void (provider === 'antigravity'
+                              ? useAntigravityStore.getState().setModel(model.id)
+                              : setDefaultModel(provider, model.id)).catch((cause) => {
                               setModelChoiceError((cause as Error).message)
                             })
                             setModelChoiceError(null)

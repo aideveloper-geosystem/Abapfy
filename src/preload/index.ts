@@ -159,7 +159,17 @@ const sapAdt: import('../shared/sapAdt').SapAdtApi = {
   closeAll: () => ipcRenderer.invoke('sapAdt:closeAll')
 }
 
+const antigravity: import('../shared/antigravity').AntigravityApi = {
+  status: () => ipcRenderer.invoke('antigravity:status'),
+  getPreferences: (userId) => ipcRenderer.invoke('antigravity:getPreferences', userId),
+  setPreferences: (userId, preferences) =>
+    ipcRenderer.invoke('antigravity:setPreferences', userId, preferences),
+  ask: (request) => ipcRenderer.invoke('antigravity:ask', request),
+  cancel: (requestId) => ipcRenderer.invoke('antigravity:cancel', requestId)
+}
+
 const api = {
+  antigravity,
   sapAdt,
   localFeatures,
   windowControls,

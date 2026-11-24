@@ -4,8 +4,17 @@ import { textPage } from './fileWorkspace'
 import type { FileWorkspace, WorkspaceTool } from './fileWorkspace'
 import { workStep, progressPrompt, recordSourceCoverage, type WorkProgress } from './workProgress'
 import { claudeTurn, openAiTurn, geminiTurn } from './imagePayload'
-import type { AiProviderId } from '@renderer/lib/aiProviders'
+import type { ChatProviderId } from '@renderer/lib/aiProviders'
 import type { ChatTurn } from '@renderer/lib/aiClient'
+import { askAntigravity } from './antigravityClient'
+import {
+  buildAntigravityPrompt,
+  INVALID_TOOL_CALL_MESSAGE,
+  parseModelOutput,
+  renderToolResults,
+  toolCatalog,
+  type ProtocolTool
+} from '../../../shared/antigravityProtocol'
 import type { McpServerItem } from '@renderer/store/mcpStore'
 import {
   ANTHROPIC_API_URL,
@@ -77,7 +86,7 @@ export interface McpToolEvent {
 }
 
 export interface RunMcpArgs {
-  provider: AiProviderId
+  provider: ChatProviderId
   model: string
   apiKey: string
   messages: ChatTurn[]
@@ -614,7 +623,7 @@ function renewToolHistory(
   messages: Array<Record<string, unknown>>,
   args: RunMcpArgs,
   tools: McpToolInfo[],
-  provider: AiProviderId
+  provider: ChatProviderId
 ): boolean {
   const note = {
     role: 'user' as const,
@@ -1110,6 +1119,132 @@ async function runGemini(
   return executions
 }
 
+const MAX_AGY_INVALID_ROUNDS = 3
+
+function antigravityWindow(
+  turns: ChatTurn[],
+  args: RunMcpArgs,
+  tools: ProtocolTool[]
+): boolean {
+  const budget = (args.inputBudget ?? 60000) * 3
+  const fixed = (args.systemPrompt?.length ?? 0) + toolCatalog(tools).length
+  const size = (list: ChatTurn[]): number =>
+    fixed + list.reduce((total, turn) => total + turn.content.length, 0)
+  if (size(turns) <= budget) return true
+  // Resultados recentes ficam exatos; os antigos podem ser relidos pelas ferramentas.
+  for (let i = 0; i < turns.length - 4 && size(turns) > budget; i++) {
+    if (turns[i].role === 'user' && turns[i].content.startsWith('<tool_result'))
+      turns[i] = {
+        role: 'user',
+        content:
+          '<tool_result>Resultado anterior fora da janela de trabalho; consulte a fonte novamente antes de usar detalhes exatos.</tool_result>'
+      }
+  }
+  if (size(turns) <= budget) return true
+  const renewed: ChatTurn[] = [
+    ...args.messages,
+    {
+      role: 'user',
+      content:
+        progressPrompt(args.currentProgress?.() ?? args.progress) +
+        '\nJanela de trabalho reorganizada automaticamente. Continue a tarefa original a partir das pendências e resultados registrados. Fontes completas continuam nas ferramentas; releia detalhes necessários. Não repita operações já verificadas nem gravações incertas.'
+    }
+  ]
+  if (size(renewed) > budget) return false
+  turns.splice(0, turns.length, ...renewed)
+  args.onSessionState?.('running', 'Contexto reorganizado · continuando a tarefa')
+  return true
+}
+
+/**
+ * Laço de ferramentas para o Antigravity. O IDE só devolve texto, então as chamadas
+ * seguem o protocolo <tool_call> (ver shared/antigravityProtocol). Cada rodada abre uma
+ * conversa nova no IDE com o histórico completo, que é como o Abapfy mantém o controle
+ * de permissões, confirmações e contexto — idêntico aos demais provedores.
+ */
+async function runAntigravity(
+  args: RunMcpArgs,
+  configs: McpServerConfig[],
+  tools: McpToolInfo[]
+): Promise<ToolExecution[]> {
+  const turns: ChatTurn[] = args.messages.map((turn) => ({ ...turn }))
+  const protocolTools: ProtocolTool[] = tools.map((tool) => ({
+    qualifiedName: tool.qualifiedName,
+    serverName: tool.serverName,
+    description: tool.description,
+    inputSchema: tool.inputSchema
+  }))
+  const executions: ToolExecution[] = [],
+    fragments: string[] = []
+  const rounds =
+    args.maxRounds ?? (args.sapAdt || args.workspace ? MAX_SAP_TOOL_ROUNDS : MAX_TOOL_ROUNDS)
+  let invalidRounds = 0
+  for (let round = 0; round < rounds; round += 1) {
+    args.signal.throwIfAborted()
+    if (!antigravityWindow(turns, args, protocolTools)) {
+      executions.push(limitReceipt())
+      return executions
+    }
+    const result = await askAntigravity(
+      args.model,
+      buildAntigravityPrompt({
+        systemPrompt: args.systemPrompt,
+        turns,
+        tools: protocolTools,
+        closing:
+          round === 0
+            ? 'Responda agora como ASSISTENTE: chame as ferramentas necessárias ou, se nenhuma for necessária, responda ao USUÁRIO.'
+            : 'Continue como ASSISTENTE: chame mais ferramentas se faltar informação ou responda ao USUÁRIO com base nos <tool_result> acima.'
+      }),
+      args.signal
+    )
+    args.onUsage?.(result.inputTokens ?? 0, result.outputTokens ?? 0)
+    const parsed = parseModelOutput(result.content)
+    if (!parsed.calls.length && !parsed.invalid.length) {
+      const text = result.content.trim()
+      const correction = await args.beforeAnswer?.(fragments.join('') + text)
+      if (correction) {
+        turns.push({ role: 'assistant', content: text }, { role: 'user', content: correction })
+        continue
+      }
+      if (text) executions.push(summaryReceipt(fragments.join('') + text))
+      return executions
+    }
+    if (parsed.narration) args.onNarration?.(parsed.narration)
+    // Tudo que o modelo escreveu depois do último bloco seria um resultado inventado.
+    const end = result.content.toLowerCase().lastIndexOf('</tool_call>')
+    turns.push({
+      role: 'assistant',
+      content: end >= 0 ? result.content.slice(0, end + '</tool_call>'.length) : result.content
+    })
+    if (!parsed.calls.length) {
+      invalidRounds += 1
+      if (invalidRounds > MAX_AGY_INVALID_ROUNDS)
+        throw new Error('O modelo não conseguiu formatar as chamadas de ferramenta. Tente novamente.')
+      turns.push({ role: 'user', content: INVALID_TOOL_CALL_MESSAGE })
+      continue
+    }
+    const batch = await dispatchBatch(args, tools, configs, parsed.calls)
+    executions.push(...batch)
+    turns.push({
+      role: 'user',
+      content: [
+        renderToolResults(
+          parsed.calls.map((call, index) => ({
+            name: call.name,
+            json: safeJson(batch[index].result, batch[index].resultId)
+          }))
+        ),
+        parsed.invalid.length ? INVALID_TOOL_CALL_MESSAGE : ''
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+    })
+  }
+  executions.push(limitReceipt())
+  return executions
+}
+
 export async function runMcpToolLoop(args: RunMcpArgs): Promise<string | null> {
   if (args.servers.length === 0 && !args.sapAdt && !args.workspace && !args.extraTools?.length)
     return null
@@ -1360,7 +1495,9 @@ export async function runMcpToolLoop(args: RunMcpArgs): Promise<string | null> {
         ? await runOpenAi(toolArgs, configs, tools)
         : args.provider === 'claude'
           ? await runClaude(toolArgs, configs, tools)
-          : await runGemini(toolArgs, configs, tools)
+          : args.provider === 'antigravity'
+            ? await runAntigravity(toolArgs, configs, tools)
+            : await runGemini(toolArgs, configs, tools)
     if (
       executions.length === 0 &&
       failures.length === 0 &&

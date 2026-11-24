@@ -6,6 +6,14 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-24
+
+### Antigravity
+
+- Nova aba **Integrações → Antigravity**: usa os modelos Gemini do Antigravity IDE com o login do próprio IDE. Ao ligar, o chat passa a usar só esses modelos e as APIs com chave ficam desativadas; agentes, skills, SAP ADT, MCP, arquivos e compactação de contexto continuam funcionando.
+- A tela mostra o status do IDE, o plano, a cota restante por família com o horário de renovação e o uso do Abapfy na sessão.
+- Detalhes e limitações em `docs/antigravity.md`.
+
 ## [1.2.2] - 2026-11-24
 
 ### Claude

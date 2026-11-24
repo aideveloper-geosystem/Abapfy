@@ -145,6 +145,7 @@ export interface McpApi {
 }
 
 export interface Api {
+  antigravity: import('../shared/antigravity').AntigravityApi
   sapAdt: import('../shared/sapAdt').SapAdtApi
   localFeatures: import('../shared/localFeatures').LocalFeaturesApi
   windowControls: WindowControlsApi

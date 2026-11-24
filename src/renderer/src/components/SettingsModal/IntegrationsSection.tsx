@@ -9,6 +9,7 @@ import {
   type SapAdtConnectionView
 } from '../../../../shared/sapAdt'
 import { McpSection } from './McpSection'
+import { AntigravitySection } from './AntigravitySection'
 import './SettingsSections.css'
 import './IntegrationsSection.css'
 
@@ -51,7 +52,7 @@ function message(error: unknown): string {
 }
 
 export function IntegrationsSection(): JSX.Element {
-  const [tab, setTab] = useState<'sap' | 'mcp'>('sap')
+  const [tab, setTab] = useState<'sap' | 'mcp' | 'antigravity'>('sap')
   const userId = useAuthStore((state) => state.user?.id)
   return (
     <div className="integrations-container">
@@ -72,8 +73,22 @@ export function IntegrationsSection(): JSX.Element {
         >
           Servidores MCP
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'antigravity'}
+          onClick={() => setTab('antigravity')}
+        >
+          Antigravity
+        </button>
       </div>
-      {tab === 'sap' ? <SapAdtSection key={userId} /> : <McpSection />}
+      {tab === 'sap' ? (
+        <SapAdtSection key={userId} />
+      ) : tab === 'mcp' ? (
+        <McpSection />
+      ) : (
+        <AntigravitySection key={userId} />
+      )}
     </div>
   )
 }

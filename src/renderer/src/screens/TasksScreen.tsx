@@ -38,7 +38,7 @@ import {
 import { useClientsStore } from '@renderer/store/clientsStore'
 import { loadClientFolders, folderPath, type DriveFolder } from '@renderer/lib/clientFolderContext'
 import { useChatStore } from '@renderer/store/chatStore'
-import { useSettingsStore } from '@renderer/store/settingsStore'
+import { useEffectiveModel } from '@renderer/lib/effectiveModel'
 import { useAuthStore } from '@renderer/store/authStore'
 import { suggestTaskDraft } from '@renderer/lib/taskAssistant'
 import {
@@ -331,7 +331,7 @@ A tarefa fica visível para todos os membros, sem responsável, e suas dependên
   } = useTasksStore()
   const { projects, recentChats, projectChats, loadProjectChats } = useChatStore()
   const user = useAuthStore((state) => state.user)
-  const { defaultProvider, defaultModel } = useSettingsStore()
+  const { provider: defaultProvider, model: defaultModel } = useEffectiveModel()
   useEffect(() => {
     if (form.projectId) void loadProjectChats(form.projectId)
   }, [form.projectId, loadProjectChats])

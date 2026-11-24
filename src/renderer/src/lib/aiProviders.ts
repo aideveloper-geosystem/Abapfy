@@ -1,4 +1,6 @@
 export type AiProviderId = 'openai' | 'gemini' | 'claude'
+/** Provedores de chat: as APIs com chave própria mais o Antigravity (login do IDE, sem chave). */
+export type ChatProviderId = AiProviderId | 'antigravity'
 
 export interface AiProviderDefinition {
   id: AiProviderId

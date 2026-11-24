@@ -1,5 +1,5 @@
 import { fetchApiKey, streamChat } from '@renderer/lib/aiClient'
-import type { AiProviderId } from '@renderer/lib/aiProviders'
+import type { ChatProviderId } from '@renderer/lib/aiProviders'
 import type { TaskItem, TaskSubtask, TaskPriority } from '@renderer/store/tasksStore'
 
 export interface SuggestedTaskDraft {
@@ -38,7 +38,7 @@ function parseSuggestion(content: string): SuggestedTaskDraft {
 
 export async function suggestTaskDraft(input: {
   userId: string
-  provider: AiProviderId
+  provider: ChatProviderId
   model: string
   brief: string
 }): Promise<SuggestedTaskDraft> {

@@ -9,7 +9,11 @@ import {
   validSnapshot
 } from './contextCompactor'
 import { useContextStore } from '../store/contextStore'
-import type { CompactionSettings, ContextSnapshot } from '../../../shared/compaction'
+import type {
+  CompactionSettings,
+  ContextSnapshot,
+  ContextSummary
+} from '../../../shared/compaction'
 
 const locks = new Set<string>()
 export async function prepareContext(args: {
@@ -21,6 +25,15 @@ export async function prepareContext(args: {
   signal: AbortSignal
   force?: boolean
   authorizeRouter: () => Promise<string>
+  /** Resumo por outro motor (Antigravity): dispensa o router Claude e sua chave. */
+  summarizer?: {
+    model: string
+    request: (
+      system: string,
+      content: string,
+      maxTokens: number
+    ) => Promise<{ summary: ContextSummary; inputTokens: number; outputTokens: number }>
+  }
   onProgress: (label: string) => void
   isCurrentUser: () => boolean
   countTokens?: (messages: ChatTurn[], prompt: string) => Promise<number | null>
@@ -96,15 +109,17 @@ export async function prepareContext(args: {
       detail: 'Preparando histórico e verificando o router…'
     })
     args.onProgress('Preparando compactação de contexto')
-    const apiKey = await args.authorizeRouter()
+    const apiKey = args.summarizer ? '' : await args.authorizeRouter()
     args.signal.throwIfAborted()
     const snapshot = await compactContext({
       ...args,
       previous,
-      model: ROUTER_MODEL,
+      model: args.summarizer?.model ?? ROUTER_MODEL,
       request: (system, content, maxTokens) => {
         checkAccount()
-        return summarizeWithRouter({ apiKey, system, content, maxTokens, signal: args.signal })
+        return args.summarizer
+          ? args.summarizer.request(system, content, maxTokens)
+          : summarizeWithRouter({ apiKey, system, content, maxTokens, signal: args.signal })
       },
       onProgress: (step, total) => {
         const detail = `Resumindo histórico · etapa ${step} de ${total}`

@@ -6,7 +6,10 @@ import {
 } from './providerRecovery'
 import { claudeTurn, openAiTurn, geminiTurn } from './imagePayload'
 import { supabase } from '@renderer/lib/supabaseClient'
-import type { AiProviderId } from '@renderer/lib/aiProviders'
+import type { ChatProviderId } from '@renderer/lib/aiProviders'
+import { askAntigravity } from './antigravityClient'
+import { ANTIGRAVITY_LOCAL_KEY } from '../../../shared/antigravity'
+import { buildAntigravityPrompt } from '../../../shared/antigravityProtocol'
 import { contextSummarySchema, type ContextSummary } from '../../../shared/compaction'
 import {
   ANTHROPIC_API_URL,
@@ -117,6 +120,30 @@ export async function summarizeWithRouter(args: {
   }
 }
 
+/** Mesmo resumo estruturado do router, mas gerado por um modelo Gemini do Antigravity. */
+export async function summarizeWithAntigravity(args: {
+  model: string
+  system: string
+  content: string
+  signal: AbortSignal
+}): Promise<{ summary: ContextSummary; inputTokens: number; outputTokens: number }> {
+  const result = await askAntigravity(
+    args.model,
+    `${args.system}\n\nResponda somente com o JSON pedido, sem texto fora dele.\n\n${args.content}`,
+    args.signal
+  )
+  const raw = result.content
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+  const summary = contextSummarySchema.parse(JSON.parse(raw))
+  return {
+    summary,
+    inputTokens: result.inputTokens ?? 0,
+    outputTokens: result.outputTokens ?? 0
+  }
+}
+
 async function requestRouter(
   claudeApiKey: string,
   system: string,
@@ -187,7 +214,7 @@ export interface StreamFinishInfo {
 }
 
 interface StreamChatArgs {
-  provider: AiProviderId
+  provider: ChatProviderId
   model: string
   apiKey: string
   messages: ChatTurn[]
@@ -292,7 +319,9 @@ function handleClaudeServerToolEvent(
   }
 }
 
-export async function fetchApiKey(userId: string, provider: AiProviderId): Promise<string | null> {
+export async function fetchApiKey(userId: string, provider: ChatProviderId): Promise<string | null> {
+  // O Antigravity usa o login do IDE: não há chave de API para buscar.
+  if (provider === 'antigravity') return ANTIGRAVITY_LOCAL_KEY
   const { data, error } = await supabase
     .from('ai_api_keys')
     .select('api_key')
@@ -625,6 +654,23 @@ async function streamClaude(args: StreamChatArgs): Promise<void> {
   args.onFinish?.({ reason, inputTokens, outputTokens })
 }
 
+async function streamAntigravity(args: StreamChatArgs): Promise<void> {
+  // O IDE devolve a resposta inteira de uma vez (não há fluxo parcial).
+  const result = await askAntigravity(
+    args.model,
+    buildAntigravityPrompt({ systemPrompt: args.systemPrompt, turns: args.messages }),
+    args.signal
+  )
+  if (!result.content.trim())
+    throw new Error('Antigravity: o modelo devolveu uma resposta vazia. Tente novamente.')
+  args.onDelta(result.content)
+  args.onFinish?.({
+    reason: 'stop',
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens
+  })
+}
+
 export async function streamChat(args: StreamChatArgs): Promise<void> {
   let visible = ''
   await recoverProvider(
@@ -656,6 +702,8 @@ export async function streamChat(args: StreamChatArgs): Promise<void> {
           return streamGemini(request)
         case 'claude':
           return streamClaude(request)
+        case 'antigravity':
+          return streamAntigravity(request)
         default:
           throw new Error(`Provedor desconhecido: ${args.provider}`)
       }

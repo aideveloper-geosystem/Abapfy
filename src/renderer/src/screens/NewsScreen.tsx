@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm'
 import { supabase } from '@renderer/lib/supabaseClient'
 import { fetchApiKey, streamChat } from '@renderer/lib/aiClient'
 import { useAuthStore } from '@renderer/store/authStore'
-import { useSettingsStore } from '@renderer/store/settingsStore'
+import { useEffectiveModel } from '@renderer/lib/effectiveModel'
 import { useAiModelsStore } from '@renderer/store/aiModelsStore'
 import './NewsScreen.css'
 
@@ -24,7 +24,7 @@ const EMPTY = { title: '', summary: '', body_md: '', published: true }
 export function NewsScreen(): JSX.Element {
   const { user, role } = useAuthStore()
   const canManage = role === 'MASTER' || role === 'ADMIN'
-  const { defaultProvider, defaultModel } = useSettingsStore()
+  const { provider: defaultProvider, model: defaultModel } = useEffectiveModel()
   const availableFor = useAiModelsStore((state) => state.availableFor)
   const [posts, setPosts] = useState<NewsPost[]>([])
   const [likes, setLikes] = useState<NewsLike[]>([])
@@ -93,11 +93,14 @@ export function NewsScreen(): JSX.Element {
 
   async function improve(mode: 'create' | 'refine'): Promise<void> {
     if (!user || !defaultProvider || !defaultModel) { setError('Escolha um modelo padrão nas configurações de IA.'); return }
-    if (!availableFor(user.id).some((model) => model.provider === defaultProvider && model.model_id === defaultModel)) {
-      setError('O modelo padrão está indisponível para seu usuário.'); return
+    // Antigravity: login do próprio IDE, sem modelo gerenciado nem RPC de acesso.
+    if (defaultProvider !== 'antigravity') {
+      if (!availableFor(user.id).some((model) => model.provider === defaultProvider && model.model_id === defaultModel)) {
+        setError('O modelo padrão está indisponível para seu usuário.'); return
+      }
+      const { data: allowed, error: accessError } = await supabase.rpc('can_use_ai_model', { p_provider: defaultProvider, p_model_id: defaultModel })
+      if (accessError || !allowed) { setError('O modelo padrão está indisponível para seu usuário.'); return }
     }
-    const { data: allowed, error: accessError } = await supabase.rpc('can_use_ai_model', { p_provider: defaultProvider, p_model_id: defaultModel })
-    if (accessError || !allowed) { setError('O modelo padrão está indisponível para seu usuário.'); return }
     const apiKey = await fetchApiKey(user.id, defaultProvider)
     if (!apiKey) { setError('Chave de API não configurada para o modelo padrão.'); return }
     generation.current?.abort()
