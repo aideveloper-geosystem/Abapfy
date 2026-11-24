@@ -17,6 +17,10 @@
 export const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages'
 
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01'
+// Thinking assinado fica preso ao prefixo da conversa. Ao compactar resultados antigos
+// (fitToolHistory) o prefixo muda e a API devolveria 400 "Invalid signature"; com este
+// beta ela descarta só o bloco divergente e segue a requisição.
+const THINKING_BINDING_BETA = 'thinking-binding-controls-2026-08-01'
 
 const GEN_5_5 = /^claude-(opus|sonnet)-5-5/
 // Haiku, Claude 3.x e Opus/Sonnet 4.0–4.5 (inclui IDs datados como claude-sonnet-4-20250514).
@@ -33,14 +37,21 @@ export function claudeGeneration(model: string): ClaudeGeneration {
 }
 
 export function claudeHeaders(apiKey: string, model: string): Record<string, string> {
+  const generation = claudeGeneration(model)
+  const betas = [
+    ...(generation === 'gen-5-5' ? [FALLBACK_BETA] : []),
+    ...(generation === 'gen-5-5' ? [THINKING_BINDING_BETA] : [])
+  ]
   return {
     'Content-Type': 'application/json',
     'x-api-key': apiKey,
     'anthropic-version': '2023-06-01',
     'anthropic-dangerous-direct-browser-access': 'true',
-    ...(claudeGeneration(model) === 'gen-5-5' ? { 'anthropic-beta': FALLBACK_BETA } : {})
+    ...(betas.length ? { 'anthropic-beta': betas.join(',') } : {})
   }
 }
+
+const THINKING_BINDING = { block_binding: { prefix_mismatch_behavior: 'drop_block' } }
 
 interface ClaudeBodyOptions {
   /** Effort desejado; ignorado em modelos legados. */
@@ -71,7 +82,11 @@ export function claudeModelParams(model: string, options: ClaudeBodyOptions): Re
   const params: Record<string, unknown> = {
     model,
     max_tokens: options.thinkingMaxTokens,
-    thinking: options.showThinking ? { type: 'adaptive', display: 'summarized' } : { type: 'adaptive' },
+    thinking: {
+      type: 'adaptive',
+      ...(options.showThinking ? { display: 'summarized' } : {}),
+      ...(generation === 'gen-5-5' ? THINKING_BINDING : {})
+    },
     output_config: { effort },
     ...PROMPT_CACHE
   }

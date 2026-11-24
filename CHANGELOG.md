@@ -6,6 +6,12 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-11-24
+
+### Claude
+
+- Correção: tarefas longas com Opus/Sonnet 5.5 não falham mais com `Invalid signature in thinking block`. Ao compactar resultados antigos o raciocínio assinado deixava de bater com o histórico; agora a API descarta só o bloco divergente (`prefix_mismatch_behavior: drop_block`) e a resposta continua.
+
 ## [1.2.1] - 2026-11-19
 
 ### Autorizações
