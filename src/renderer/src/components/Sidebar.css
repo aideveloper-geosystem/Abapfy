@@ -172,6 +172,12 @@
   }
 }
 
+.sidebar-public-mark {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-ink-tertiary);
+}
+
 .chat-row-menu {
   position: relative;
   flex-shrink: 0;

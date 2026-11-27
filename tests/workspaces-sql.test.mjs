@@ -41,7 +41,8 @@ test('041_workspaces.sql migrates users, isolates data and enforces roles', { sk
         ['tests/sql/workspaces-043.test.sql'],
         ['tests/sql/task-boards-044.test.sql'],
         ['tests/sql/task-move-045.test.sql'],
-        ['tests/sql/code-patterns-046.test.sql']
+        ['tests/sql/code-patterns-046.test.sql'],
+        ['tests/sql/private-chats-048.test.sql']
       ]) {
         const result = psql(...step)
         assert.equal(result.status, 0, `${step[0]} failed:\n${result.stderr}`)

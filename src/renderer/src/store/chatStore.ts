@@ -17,6 +17,8 @@ export interface ChatSummary {
   clientId: string
   moduleId: string
   userId: string
+  isPublic: boolean
+  archived: boolean
 }
 
 export interface ProjectSummary {
@@ -47,6 +49,8 @@ export interface ChatMeta {
   clientId: string
   moduleId: string
   folderId: string | null
+  userId: string
+  isPublic: boolean
 }
 
 export interface PersistedToolActivity {
@@ -133,6 +137,9 @@ interface ChatState {
   deleteChat: (chatId: string) => Promise<boolean>
   archiveChat: (chatId: string) => Promise<boolean>
   moveChatToProject: (chatId: string, projectId: string | null) => Promise<boolean>
+  setChatPublic: (chatId: string, isPublic: boolean) => Promise<boolean>
+  restoreChat: (chatId: string) => Promise<boolean>
+  duplicateChat: (chatId: string) => Promise<string>
   reset: () => void
 }
 
@@ -149,6 +156,8 @@ function toChatSummary(row: {
   client_id: string
   module_id: string
   user_id: string
+  is_public?: boolean | null
+  archived?: boolean | null
 }): ChatSummary {
   return {
     id: row.id,
@@ -158,14 +167,68 @@ function toChatSummary(row: {
     updatedAt: row.updated_at,
     clientId: row.client_id,
     moduleId: row.module_id,
-    userId: row.user_id
+    userId: row.user_id,
+    isPublic: Boolean(row.is_public),
+    archived: Boolean(row.archived)
+  }
+}
+
+const CHAT_COLUMNS =
+  'id, title, project_id, agent_name, updated_at, client_id, module_id, user_id, is_public, archived'
+export const CHAT_PAGE_SIZE = 50
+
+export interface ChatSearchFilters {
+  query?: string
+  clientId?: string | null
+  owner?: OwnerFilter
+  publicOnly?: boolean
+  archived?: boolean
+  since?: string | null
+  offset?: number
+}
+
+export interface ChatSearchResult extends ChatSummary {
+  /** Trecho da primeira mensagem que corresponde à busca. */
+  excerpt: string | null
+}
+
+/** Searches titles and message contents; row level security limits what can be found (migration 048). */
+export async function searchChats(
+  filters: ChatSearchFilters
+): Promise<{ chats: ChatSearchResult[]; hasMore: boolean }> {
+  const userId = currentUserId()
+  if (!userId) throw new Error('Entre novamente para carregar as sessões.')
+  const owner = filters.owner ?? 'all'
+  if (owner === 'unknown') return { chats: [], hasMore: false }
+  const { data, error } = await supabase.rpc('search_chats', {
+    p_query: filters.query?.trim() ?? '',
+    p_client: filters.clientId ?? null,
+    p_user: owner === 'mine' ? userId : owner.startsWith('user:') ? owner.slice(5) : null,
+    p_exclude_user: owner === 'team' ? userId : null,
+    p_public_only: filters.publicOnly ?? false,
+    p_archived: filters.archived ?? false,
+    p_since: filters.since ?? null,
+    p_limit: CHAT_PAGE_SIZE + 1,
+    p_offset: filters.offset ?? 0
+  })
+  if (currentUserId() !== userId) throw new Error('A conta mudou durante o carregamento.')
+  if (error)
+    throw new Error(`${error.message}. Confira se a migração 048 foi aplicada no Supabase.`)
+  const rows = (data ?? []) as Array<
+    Parameters<typeof toChatSummary>[0] & { excerpt: string | null }
+  >
+  return {
+    chats: rows
+      .slice(0, CHAT_PAGE_SIZE)
+      .map((row) => ({ ...toChatSummary(row), excerpt: row.excerpt })),
+    hasMore: rows.length > CHAT_PAGE_SIZE
   }
 }
 
 export async function loadModuleChatPage(clientId: string, moduleId: string, offset = 0, owner: OwnerFilter = 'all'): Promise<{ chats: ChatSummary[]; hasMore: boolean }> {
   const userId = currentUserId()
   if (!userId) throw new Error('Entre novamente para carregar os chats.')
-  let query = supabase.from('chats').select('id, title, project_id, agent_name, updated_at, client_id, module_id, user_id')
+  let query = supabase.from('chats').select(CHAT_COLUMNS)
     .eq('archived', false).eq('client_id', clientId).eq('module_id', moduleId)
   if (owner === 'mine') query = query.eq('user_id', userId)
   else if (owner === 'team') query = query.neq('user_id', userId)
@@ -191,14 +254,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const [{ data: ownRows, error: ownError }, { data: teamRows, error: teamError }, { data: projectRows }] = await Promise.all([
       supabase
         .from('chats')
-        .select('id, title, project_id, agent_name, updated_at, client_id, module_id, user_id')
+        .select(CHAT_COLUMNS)
         .eq('archived', false)
         .is('project_id', null)
         .eq('user_id', userId)
         .order('updated_at', { ascending: false })
         .limit(30),
       supabase.from('chats')
-        .select('id, title, project_id, agent_name, updated_at, client_id, module_id, user_id')
+        .select(CHAT_COLUMNS)
         .eq('archived', false).is('project_id', null).neq('user_id', userId)
         .order('updated_at', { ascending: false }).limit(30),
       supabase
@@ -234,7 +297,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const { data } = await supabase
       .from('chats')
-      .select('id, title, project_id, agent_name, updated_at, client_id, module_id, user_id')
+      .select(CHAT_COLUMNS)
       .eq('archived', false)
       .eq('project_id', projectId)
       .order('updated_at', { ascending: false })
@@ -323,7 +386,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         sap_environment_id: input.sapEnvironmentId,
         sap_environment_label: input.sapEnvironmentLabel
       })
-      .select('id, title, project_id, agent_name, updated_at, client_id, module_id, user_id')
+      .select(CHAT_COLUMNS)
       .single()
 
     if (error || !data) return null
@@ -365,7 +428,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       sapEnvironmentLabel: data.sap_environment_label ?? null,
       clientId: data.client_id,
       moduleId: data.module_id,
-      folderId: data.folder_id ?? null
+      folderId: data.folder_id ?? null,
+      userId: data.user_id,
+      isPublic: Boolean(data.is_public)
     }
   },
 
@@ -449,8 +514,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const userId = currentUserId()
     if (!userId) return false
 
-    const { error } = await supabase.from('chats').delete().eq('id', chatId)
-    if (error) return false
+    // RLS ignora em silêncio quem não é o autor: só confirma se a linha voltar.
+    const { data, error } = await supabase.from('chats').delete().eq('id', chatId).select('id')
+    if (error || !data?.length) return false
 
     set((state) => ({
       recentChats: state.recentChats.filter((chat) => chat.id !== chatId),
@@ -468,11 +534,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const userId = currentUserId()
     if (!userId) return false
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('chats')
       .update({ archived: true })
       .eq('id', chatId)
-    if (error) return false
+      .select('id')
+    if (error || !data?.length) return false
 
     set((state) => ({
       recentChats: state.recentChats.filter((chat) => chat.id !== chatId),
@@ -494,7 +561,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       .from('chats')
       .update({ project_id: projectId })
       .eq('id', chatId)
-      .select('id, title, project_id, agent_name, updated_at, client_id, module_id, user_id')
+      .select(CHAT_COLUMNS)
       .single()
     if (error || !data) return false
 
@@ -519,6 +586,87 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     })
     return true
+  },
+
+  setChatPublic: async (chatId, isPublic) => {
+    if (!currentUserId()) return false
+
+    const { data, error } = await supabase
+      .from('chats')
+      .update({ is_public: isPublic })
+      .eq('id', chatId)
+      .select('id')
+    if (error || !data?.length) return false
+
+    const mark = (chats: ChatSummary[]): ChatSummary[] =>
+      chats.map((chat) => (chat.id === chatId ? { ...chat, isPublic } : chat))
+    set((state) => ({
+      recentChats: mark(state.recentChats),
+      projectChats: Object.fromEntries(
+        Object.entries(state.projectChats).map(([projectId, chats]) => [projectId, mark(chats)])
+      )
+    }))
+    return true
+  },
+
+  restoreChat: async (chatId) => {
+    if (!currentUserId()) return false
+
+    const { data, error } = await supabase
+      .from('chats')
+      .update({ archived: false })
+      .eq('id', chatId)
+      .select('id')
+    if (error || !data?.length) return false
+    await get().load()
+    return true
+  },
+
+  /** Private copy of a session published by someone else, so the reader can continue it. */
+  duplicateChat: async (chatId) => {
+    const userId = currentUserId()
+    if (!userId) throw new Error('Entre novamente para duplicar a sessão.')
+    const meta = await get().loadChatMeta(chatId)
+    if (!meta) throw new Error('A sessão não está mais disponível.')
+    const messages = await get().loadChatMessages(chatId)
+
+    const newId = await get().createChat({
+      clientId: meta.clientId,
+      moduleId: meta.moduleId,
+      folderId: meta.folderId,
+      projectId: meta.projectId,
+      title: `Cópia · ${meta.title}`.slice(0, 120),
+      agentSource: meta.agentSource,
+      agentId: meta.agentId,
+      agentName: meta.agentName,
+      systemPrompt: meta.systemPrompt,
+      provider: meta.provider ?? '',
+      model: meta.model ?? '',
+      skillIds: meta.skillIds,
+      sapEnvironmentId: meta.sapEnvironmentId,
+      sapEnvironmentLabel: meta.sapEnvironmentLabel
+    })
+    if (!newId) throw new Error('Não foi possível criar a cópia da sessão.')
+
+    // Copia só o texto: documentos, tokens e progresso pertencem à execução original.
+    // O horário original é mantido porque ele define a ordem das mensagens.
+    const rows = messages
+      .filter((message) => message.content.trim())
+      .map((message) => ({
+        chat_id: newId,
+        user_id: userId,
+        role: message.role,
+        content: message.content,
+        created_at: message.createdAt
+      }))
+    if (rows.length) {
+      const { error } = await supabase.from('chat_messages').insert(rows)
+      if (error) {
+        await get().deleteChat(newId)
+        throw new Error(`Não foi possível copiar as mensagens: ${error.message}`)
+      }
+    }
+    return newId
   },
 
   reset: () => set({ error: null, loaded: false, recentChats: [], projects: [], projectChats: {} })

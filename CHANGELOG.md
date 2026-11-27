@@ -6,6 +6,31 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-27
+
+> Requer a migração `supabase/sql/048_private_chats_and_search.sql` aplicada no Supabase.
+
+### Sessões privadas
+
+- Todas as sessões, antigas e novas, são privadas. No botão direito do chat, o autor pode **Publicar** ou tornar privada; sessões publicadas aparecem na área de chats do cliente.
+- Sessões publicadas por outra pessoa abrem somente para leitura, com a opção **Duplicar para continuar**.
+- Arquivos gerados e salvos no Drive do cliente continuam visíveis aos membros do workspace.
+
+### Cliente e pastas
+
+- O novo chat pede apenas o cliente. Código ABAP é salvo em **Programas** e especificações em **EFs**; uma pasta compatível escolhida pelo usuário é respeitada.
+- Correção: a escolha automática dos agentes de EF e DTEC não depende mais de uma área selecionada à mão.
+
+### Busca
+
+- Cliente → Sessões e Ctrl+K pesquisam no título e no texto das mensagens, sem diferenciar acentos, e mostram o trecho encontrado.
+- A aba Sessões ganhou filtros por autor, período, publicadas e arquivadas, paginação e opção de desarquivar.
+
+### Contexto
+
+- Modelo guiado de Workbook, aviso para cliente sem Workbook e comando `/workbook` para sugerir acréscimos.
+- Modo **Complexa**, com orçamento de contexto de pelo menos 128 mil tokens e trabalho em etapas.
+
 ## [1.3.0] - 2026-11-24
 
 ### Antigravity

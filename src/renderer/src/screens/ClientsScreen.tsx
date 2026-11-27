@@ -5,11 +5,13 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Archive, ArchiveRestore, ArrowLeft, BookOpen, ChevronRight, FileText, Folder, FolderInput, FolderPlus, MessageSquarePlus, Pencil, Plus, Search, Star, Trash2, Upload } from 'lucide-react'
 import { supabase } from '@renderer/lib/supabaseClient'
+import { ClientSessionsTab } from '@renderer/components/ClientSessionsTab'
+import { WORKBOOK_TEMPLATE } from '@renderer/lib/clientWorkbook'
 import { extractTextFromFile } from '@renderer/lib/attachments'
 import { useAuthStore } from '@renderer/store/authStore'
 import { useClientPermissions } from '@renderer/store/workspaceStore'
 import { useClientsStore, type Client } from '@renderer/store/clientsStore'
-import { useChatStore, type ChatSummary } from '@renderer/store/chatStore'
+import { useChatStore } from '@renderer/store/chatStore'
 import { ProjectKnowledgeModal } from '@renderer/components/ProjectKnowledgeModal'
 import type { ProjectSummary } from '@renderer/store/chatStore'
 import { ClientFilePreview, type ClientFileRecord } from '@renderer/components/ClientFilePreview'
@@ -41,7 +43,7 @@ interface ClientFolder {
   created_at: string
 }
 interface Props {
-  onNewChat: (clientId: string, moduleId: string, folderId?: string | null) => void
+  onNewChat: (clientId: string, moduleId: string | null, folderId?: string | null) => void
   onOpenChat: (id: string) => void
   workPresence: WorkPresence[]
   presenceError: string | null
@@ -57,8 +59,6 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
   const canManage = perms.canEdit
   const [tab, setTab] = useState<ClientTab>('overview')
   const [newClientOpen, setNewClientOpen] = useState(false)
-  const [clientChats, setClientChats] = useState<ChatSummary[]>([])
-  const [clientChatsState, setClientChatsState] = useState<'idle' | 'loading' | 'error'>('idle')
   const [clientId, setClientId] = useState<string | null>(null)
   const [moduleId, setModuleId] = useState<string | null>(null)
   const [files, setFiles] = useState<ClientFileRecord[]>([])
@@ -109,47 +109,13 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
     () => projects.filter((p) => p.clientId === clientId),
     [projects, clientId]
   )
-  const names = useAuthorNames([...clients.map(item => item.createdBy), ...modules.map(item => item.createdBy), ...files.map(item => item.user_id), ...folders.map(item => item.user_id), ...visibleProjects.map(item => item.userId), ...clientChats.map(item => item.userId)])
+  const names = useAuthorNames([...clients.map(item => item.createdBy), ...modules.map(item => item.createdBy), ...files.map(item => item.user_id), ...folders.map(item => item.user_id), ...visibleProjects.map(item => item.userId)])
   const author = (id: string | null | undefined): string => creatorLabel(id, names, user?.id)
   const date = contentDate
   const contentMatches = (id: string | null | undefined, ...fields: (string | null | undefined)[]): boolean => matchesOwner(id, user?.id, contentOwner) && matchesContent(contentQuery, ...fields, author(id), id ? names[id] : '')
   const filteredModules = modules.filter(item => item.clientId === clientId && contentMatches(item.createdBy, item.name, item.description))
   const filteredProjects = visibleProjects.filter(item => contentMatches(item.userId, item.name, item.description))
   const visibleFiles = files.filter(item => item.folder_id === folderId && contentMatches(item.user_id, item.name))
-  const lastSession = useRef(0)
-  useEffect(() => {
-    if (!clientId || tab !== 'sessions') return
-    const request = ++lastSession.current
-    setClientChatsState('loading')
-    void supabase
-      .from('chats')
-      .select('id, title, project_id, agent_name, updated_at, client_id, module_id, user_id')
-      .eq('client_id', clientId)
-      .order('updated_at', { ascending: false })
-      .limit(100)
-      .then(({ data, error: loadError }) => {
-        if (request !== lastSession.current) return
-        if (loadError) {
-          setClientChats([])
-          setClientChatsState('error')
-          return
-        }
-        setClientChats(
-          (data ?? []).map((row) => ({
-            id: row.id,
-            title: row.title,
-            projectId: row.project_id,
-            agentName: row.agent_name,
-            updatedAt: row.updated_at,
-            clientId: row.client_id,
-            moduleId: row.module_id,
-            userId: row.user_id
-          }))
-        )
-        setClientChatsState('idle')
-      })
-  }, [clientId, tab, user?.id])
-
   useEffect(() => {
     void load()
     void loadStats()
@@ -358,8 +324,7 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
   const clientModules = client ? modules.filter((item) => item.clientId === client.id) : []
 
   function startSession(target: Client): void {
-    const first = modules.find((item) => item.clientId === target.id)
-    if (first) onNewChat(target.id, first.id, null)
+    if (modules.some((item) => item.clientId === target.id)) onNewChat(target.id, null, null)
   }
 
   async function archive(target: Client, archived: boolean): Promise<void> {
@@ -480,6 +445,9 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
                       />
                     </label>
                     <button onClick={() => setEditingWorkbook(true)}>Editar workbook</button>
+                    {!workbook.trim() && (
+                      <button onClick={() => { setWorkbook(WORKBOOK_TEMPLATE); setEditingWorkbook(true) }}>Usar modelo guiado</button>
+                    )}
                   </div>
                 )}
               </div>
@@ -667,23 +635,14 @@ export function ClientsScreen({ onNewChat, onOpenChat, workPresence, presenceErr
             )}
 
             {tab === 'sessions' && (
-              <>
-                <div className="clients-section-heading">
-                  <h3>Sessões <small className="clients-count">{clientChats.length}</small></h3>
-                  <button disabled={clientModules.length === 0 || Boolean(client.archivedAt)} onClick={() => startSession(client)}><MessageSquarePlus size={14} /> Nova sessão</button>
-                </div>
-                <div className="clients-list">
-                  {clientChats.map((chat) => (
-                    <button key={chat.id} onClick={() => onOpenChat(chat.id)}>
-                      <MessageSquarePlus size={15} />
-                      <strong>{chat.title}</strong>
-                      <small>{author(chat.userId)} · {modules.find((item) => item.id === chat.moduleId)?.name ?? 'Módulo'} · atualizado {date(chat.updatedAt)}</small>
-                      {chatWorkLabel(chat.id) && <span className="clients-work-badge">{chatWorkLabel(chat.id)}</span>}
-                    </button>
-                  ))}
-                  {clientChats.length === 0 && <p>{clientChatsState === 'loading' ? 'Carregando sessões…' : clientChatsState === 'error' ? 'Sessões indisponíveis.' : 'Nenhuma sessão neste cliente ainda.'}</p>}
-                </div>
-              </>
+              <ClientSessionsTab
+                clientId={client.id}
+                userId={user?.id ?? null}
+                canStart={clientModules.length > 0 && !client.archivedAt}
+                onNewSession={() => startSession(client)}
+                onOpenChat={onOpenChat}
+                workLabel={chatWorkLabel}
+              />
             )}
           </div>
         </section>

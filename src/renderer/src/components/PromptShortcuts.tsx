@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { Bug, ChevronDown, FileCode2, FileText, MessageSquare, Search } from 'lucide-react'
+import { WORKBOOK_SUGGESTION_PROMPT } from '@renderer/lib/clientWorkbook'
 import './AiInterface.css'
 
 export const PROMPT_SHORTCUTS = [
   { command: '/compact', label: 'Compactar o contexto da conversa', icon: FileText, prompt: '/compact' },
+  { command: '/workbook', label: 'Sugerir acréscimos ao Workbook do cliente', icon: FileText, prompt: WORKBOOK_SUGGESTION_PROMPT },
   {
     command: '/revisar',
     label: 'Revisar código ABAP',
@@ -66,7 +68,8 @@ export function AbapfyGlyph({ size = 36 }: { size?: number }): JSX.Element {
 /** Horizontal row of quiet pills with quick actions, shown right under the greeting of an empty session. */
 export function PromptStarters({ onSelect }: { onSelect: (text: string) => void }): JSX.Element {
   const [expanded, setExpanded] = useState(false)
-  const actions = PROMPT_SHORTCUTS.filter((item) => item.command !== '/compact')
+  // /compact and /workbook act on an existing conversation, so they are not starters.
+  const actions = PROMPT_SHORTCUTS.filter((item) => !['/compact', '/workbook'].includes(item.command))
   const visible = expanded ? actions : actions.slice(0, VISIBLE_ACTIONS)
   return (
     <div className="home-pills" role="group" aria-label="Sugestões para começar">

@@ -95,7 +95,7 @@ test('sidebar renders personal chats by default with real author/client metadata
   assert.match(html.replace(/<[^>]*>/g, ''),/Você · Supergasbras/)
   assert.match(html,/Autoria das sessões/)
   assert.match(html,/Minhas/)
-  assert.match(html,/Equipe/)
+  assert.match(html,/Publicadas/)
   // Sessions are grouped by client, and the primary navigation follows the new order.
   assert.match(html,/sidebar-client-header/)
   const nav = html.replace(/<[^>]*>/g, ' ')

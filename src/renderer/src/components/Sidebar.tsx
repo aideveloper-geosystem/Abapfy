@@ -1,19 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Archive,
-  ArrowLeft,
   Bot,
   ChevronDown,
   ChevronRight,
   Building2,
   ChevronsUpDown,
-  FolderInput,
   FolderKanban,
   Gauge,
+  Globe,
   ListChecks,
   LogOut,
-  MoreHorizontal,
   Newspaper,
   PanelLeftClose,
   PanelLeftOpen,
@@ -22,20 +19,20 @@ import {
   Settings,
   Sparkles,
   SquarePen,
-  Trash2,
   Users,
   Workflow
 } from 'lucide-react'
 import { useAuthStore } from '@renderer/store/authStore'
 import { useWorkspaceStore } from '@renderer/store/workspaceStore'
 import { SearchModal } from '@renderer/components/SearchModal'
-import { useChatStore, type ChatSummary, type ProjectSummary } from '@renderer/store/chatStore'
+import { useChatStore, type ChatSummary } from '@renderer/store/chatStore'
 import { useChatRuntimeStore } from '@renderer/store/chatRuntimeStore'
 import { presenceLabel, type WorkPresence } from '@renderer/lib/workPresence'
 import { UsageModal } from '@renderer/components/UsageModal'
 import { useClientsStore } from '@renderer/store/clientsStore'
 import { useAuthorNames } from '@renderer/lib/useAuthorNames'
 import { creatorLabel, matchesOwner, contentDate, type OwnerFilter } from '@renderer/lib/contentOwnership'
+import { ChatRowMenu } from './ChatRowMenu'
 import './Sidebar.css'
 
 type ShortcutId = 'new-session' | 'search' | 'projects' | 'clients' | 'flows' | 'tasks' | 'skills' | 'agents' | 'news'
@@ -78,16 +75,6 @@ interface SidebarProps {
   workPresence: WorkPresence[]
 }
 
-interface ChatRowProps {
-  chat: ChatSummary
-  active: boolean
-  projects: ProjectSummary[]
-  onSelect: () => void
-  onDelete: () => Promise<boolean>
-  onArchive: () => Promise<boolean>
-  onMove: (projectId: string | null) => Promise<boolean>
-}
-
 /**
  * Indicador de status de chats rodando em segundo plano — só faz sentido para
  * chats que não são o atualmente aberto (o chat ativo já mostra seu próprio
@@ -111,124 +98,6 @@ function ChatStatusDot({ chatId }: { chatId: string }): JSX.Element | null {
     return <span className="chat-status-dot chat-status-dot-done" title="Finalizado" />
   }
   return null
-}
-
-function ChatRowMenu({ chat, projects, onDelete, onArchive, onMove }: ChatRowProps): JSX.Element {
-  const [open, setOpen] = useState(false)
-  const [mode, setMode] = useState<'main' | 'projects'>('main')
-  const menuRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    function handleClickOutside(event: MouseEvent): void {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setOpen(false)
-        setMode('main')
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [open])
-
-  function close(): void {
-    setOpen(false)
-    setMode('main')
-  }
-
-  async function handleDelete(): Promise<void> {
-    if (!window.confirm('Excluir esta conversa? Essa ação não pode ser desfeita.')) return
-    close()
-    await onDelete()
-  }
-
-  async function handleArchive(): Promise<void> {
-    close()
-    await onArchive()
-  }
-
-  const otherProjects = projects.filter((project) => project.id !== chat.projectId && project.clientId === chat.clientId)
-
-  return (
-    <div className="chat-row-menu" ref={menuRef}>
-      <button
-        type="button"
-        className="chat-row-menu-trigger"
-        title="Mais opções"
-        onClick={(event) => {
-          event.stopPropagation()
-          setOpen((value) => !value)
-          setMode('main')
-        }}
-      >
-        <MoreHorizontal size={14} strokeWidth={1.75} />
-      </button>
-
-      {open && (
-        <div className="chat-row-menu-panel" onMouseDown={(event) => event.stopPropagation()}>
-          {mode === 'main' ? (
-            <>
-              <button
-                type="button"
-                className="chat-row-menu-item"
-                onClick={() => setMode('projects')}
-              >
-                <FolderInput size={14} strokeWidth={1.75} />
-                Adicionar a projeto
-              </button>
-              <button type="button" className="chat-row-menu-item" onClick={handleArchive}>
-                <Archive size={14} strokeWidth={1.75} />
-                Arquivar
-              </button>
-              <button
-                type="button"
-                className="chat-row-menu-item chat-row-menu-item-danger"
-                onClick={handleDelete}
-              >
-                <Trash2 size={14} strokeWidth={1.75} />
-                Apagar
-              </button>
-            </>
-          ) : (
-            <>
-              <button type="button" className="chat-row-menu-item" onClick={() => setMode('main')}>
-                <ArrowLeft size={14} strokeWidth={1.75} />
-                Voltar
-              </button>
-              {chat.projectId && (
-                <button
-                  type="button"
-                  className="chat-row-menu-item"
-                  onClick={async () => {
-                    close()
-                    await onMove(null)
-                  }}
-                >
-                  Remover do projeto atual
-                </button>
-              )}
-              {otherProjects.length === 0 ? (
-                <span className="chat-row-menu-empty">Nenhum outro projeto</span>
-              ) : (
-                otherProjects.map((project) => (
-                  <button
-                    key={project.id}
-                    type="button"
-                    className="chat-row-menu-item"
-                    onClick={async () => {
-                      close()
-                      await onMove(project.id)
-                    }}
-                  >
-                    {project.name}
-                  </button>
-                ))
-              )}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  )
 }
 
 export function Sidebar({
@@ -257,6 +126,7 @@ export function Sidebar({
   const [signOutError, setSignOutError] = useState<string | null>(null)
   const navigate = useNavigate()
   const [usageOpen, setUsageOpen] = useState(false)
+  const [menuRequest, setMenuRequest] = useState({ chatId: '', count: 0 })
   const [expandedProject, setExpandedProject] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -277,7 +147,8 @@ export function Sidebar({
     loadProjectChats,
     deleteChat,
     archiveChat,
-    moveChatToProject
+    moveChatToProject,
+    setChatPublic
   } = useChatStore((state) => ({
     recentChats: state.recentChats,
     projects: state.projects,
@@ -287,7 +158,8 @@ export function Sidebar({
     loadProjectChats: state.loadProjectChats,
     deleteChat: state.deleteChat,
     archiveChat: state.archiveChat,
-    moveChatToProject: state.moveChatToProject
+    moveChatToProject: state.moveChatToProject,
+    setChatPublic: state.setChatPublic
   }))
 
   const chatLoadError = useChatStore(state => state.error)
@@ -417,7 +289,15 @@ export function Sidebar({
   function renderChatRow(chat: ChatSummary, sublist = false): JSX.Element {
     const presenceText = presenceLabel(workPresence.filter((item) => item.chatId === chat.id), user?.id ?? null)
     return (
-      <li key={chat.id} className={`sidebar-list-row ${sublist ? 'sidebar-sublist-row' : ''}`}>
+      <li
+        key={chat.id}
+        className={`sidebar-list-row ${sublist ? 'sidebar-sublist-row' : ''}`}
+        onContextMenu={(event) => {
+          if (chat.userId !== user?.id) return
+          event.preventDefault()
+          setMenuRequest((current) => ({ chatId: chat.id, count: current.count + 1 }))
+        }}
+      >
         <button
           type="button"
           className={`sidebar-list-item sidebar-list-item-btn ${
@@ -431,15 +311,22 @@ export function Sidebar({
         <div className="sidebar-list-row-end">
           {presenceText && <span className="sidebar-work-dot" title={presenceText} />}
           {activeChatId !== chat.id && <ChatStatusDot chatId={chat.id} />}
-          <ChatRowMenu
-            chat={chat}
-            active={activeChatId === chat.id}
-            projects={projects}
-            onSelect={() => onSelectChat(chat.id)}
-            onDelete={() => handleDeleteChat(chat.id)}
-            onArchive={() => handleArchiveChat(chat.id)}
-            onMove={(projectId) => moveChatToProject(chat.id, projectId)}
-          />
+          {chat.isPublic && (
+            <span className="sidebar-public-mark" title="Publicada para o workspace">
+              <Globe size={11} strokeWidth={1.75} />
+            </span>
+          )}
+          {chat.userId === user?.id && (
+            <ChatRowMenu
+              chat={chat}
+              projects={projects}
+              openSignal={menuRequest.chatId === chat.id ? menuRequest.count : 0}
+              onDelete={() => handleDeleteChat(chat.id)}
+              onArchive={() => handleArchiveChat(chat.id)}
+              onPublish={(isPublic) => setChatPublic(chat.id, isPublic)}
+              onMove={(projectId) => moveChatToProject(chat.id, projectId)}
+            />
+          )}
         </div>
       </li>
     )
@@ -483,7 +370,7 @@ export function Sidebar({
         <div className="sidebar-section">
           <span className="sidebar-section-title">Sessões</span>
           <div className="sidebar-chat-scopes" role="group" aria-label="Autoria das sessões">
-            {([['mine', 'Minhas'], ['team', 'Equipe'], ['all', 'Todas']] as const).map(([scope, label]) => <button key={scope} type="button" aria-pressed={chatScope === scope} onClick={() => setChatScope(scope)}>{label}<span>{recentChats.filter((chat) => matchesOwner(chat.userId, user?.id, scope)).length}</span></button>)}
+            {([['mine', 'Minhas'], ['team', 'Publicadas'], ['all', 'Todas']] as const).map(([scope, label]) => <button key={scope} type="button" aria-pressed={chatScope === scope} onClick={() => setChatScope(scope)}>{label}<span>{recentChats.filter((chat) => matchesOwner(chat.userId, user?.id, scope)).length}</span></button>)}
           </div>
           {chatLoadError && <div className="sidebar-load-error" role="alert">Não foi possível atualizar as sessões.<button type="button" onClick={() => void load()}>Tentar novamente</button></div>}
           {filteredChats.length === 0 && <p className="sidebar-list-empty">{chatScope === 'mine' ? 'Você ainda não tem sessões.' : 'Nenhuma sessão neste grupo.'}</p>}
@@ -532,7 +419,7 @@ export function Sidebar({
                     )}
                     {(['mine', 'team'] as const).filter((scope) => (projectChats[project.id] ?? []).some((chat) => matchesOwner(chat.userId, user?.id, scope))).map((scope) => (
                       <li key={scope} className="sidebar-project-chat-group">
-                        <span className="sidebar-section-title">{scope === 'mine' ? 'Minhas' : 'Equipe'}</span>
+                        <span className="sidebar-section-title">{scope === 'mine' ? 'Minhas' : 'Publicadas'}</span>
                         <ul>
                           {(projectChats[project.id] ?? []).filter((chat) => matchesOwner(chat.userId, user?.id, scope)).map((chat) => renderChatRow(chat, true))}
                         </ul>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Building2, FolderKanban, MessageSquare, Search } from 'lucide-react'
-import type { ChatSummary, ProjectSummary } from '@renderer/store/chatStore'
+import { searchChats, type ChatSearchResult, type ChatSummary, type ProjectSummary } from '@renderer/store/chatStore'
 import type { Client } from '@renderer/store/clientsStore'
 import { matchesContent } from '@renderer/lib/contentOwnership'
 import './SearchModal.css'
@@ -44,11 +44,27 @@ export function SearchModal({
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  // The loaded lists only hold recent titles; the database also searches older sessions and messages.
+  const [found, setFound] = useState<{ query: string; chats: ChatSearchResult[]; error: string | null }>({ query: '', chats: [], error: null })
+  const term = query.trim()
+  const searching = open && term.length >= 2 && found.query !== term
+
+  useEffect(() => {
+    if (!open || term.length < 2) return
+    let active = true
+    const timer = window.setTimeout(() => {
+      searchChats({ query: term })
+        .then((page) => { if (active) setFound({ query: term, chats: page.chats, error: null }) })
+        .catch((cause: Error) => { if (active) setFound({ query: term, chats: [], error: cause.message }) })
+    }, 300)
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [open, term])
 
   useEffect(() => {
     if (open) {
       setQuery('')
       setIndex(0)
+      setFound({ query: '', chats: [], error: null })
       window.setTimeout(() => inputRef.current?.focus(), 0)
     }
   }, [open])
@@ -80,9 +96,19 @@ export function SearchModal({
       }))
     ]
     const text = query.trim()
-    return (text ? all.filter((item) => matchesContent(text, item.title, item.detail)) : all).slice(0, MAX_RESULTS)
+    if (!text) return all.slice(0, MAX_RESULTS)
+    const local = all.filter((item) => matchesContent(text, item.title, item.detail))
+    const remote = (found.query === text ? found.chats : []).map<Result>((chat) => ({
+      key: `chat-${chat.id}`,
+      kind: 'chat',
+      title: chat.title,
+      detail: [clientName(chat.clientId), authorName(chat.userId), chat.excerpt].filter(Boolean).join(' · '),
+      open: () => onSelectChat(chat.id)
+    }))
+    const remoteKeys = new Set(remote.map((item) => item.key))
+    return [...remote, ...local.filter((item) => !remoteKeys.has(item.key))].slice(0, MAX_RESULTS)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, chats, projects, clients])
+  }, [query, chats, projects, clients, found])
 
   if (!open) return null
 
@@ -128,7 +154,9 @@ export function SearchModal({
           <kbd>Esc</kbd>
         </label>
         <ul className="search-modal-results" role="listbox">
-          {results.length === 0 && <li className="search-modal-empty">Nada encontrado para “{query}”.</li>}
+          {searching && <li className="search-modal-empty" role="status">Buscando nas mensagens…</li>}
+          {found.error && found.query === term && <li className="search-modal-empty" role="alert">Busca nas mensagens indisponível: {found.error}</li>}
+          {results.length === 0 && !searching && <li className="search-modal-empty">Nada encontrado para “{query}”.</li>}
           {results.map((result, position) => {
             const Icon = ICONS[result.kind]
             return (

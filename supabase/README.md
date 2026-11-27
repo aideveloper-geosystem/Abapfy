@@ -142,3 +142,21 @@ API devem ser validados com sua conta.
 
 Referências: [lançamento](https://www.anthropic.com/claude-haiku-5-5),
 [migração oficial](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide).
+
+## Sessões privadas, publicação e busca (048)
+
+Aplique [048_private_chats_and_search.sql](sql/048_private_chats_and_search.sql) depois da 047, no
+SQL Editor, **antes de distribuir a versão do app que a utiliza**. Sem ela, as listas de sessões
+não carregam na versão nova.
+
+Efeito imediato, também para quem usa uma versão anterior do app:
+
+- todas as sessões existentes passam a ser privadas do autor;
+- só o autor altera, arquiva, exclui e escreve na sessão;
+- o botão direito > **Publicar** libera a leitura aos membros do workspace, na aba Sessões do cliente;
+- administradores e proprietários do workspace não leem sessões privadas de terceiros. Por isso, um
+  cliente com sessões privadas de outras pessoas não pode ser excluído pela tela; trate pelo SQL Editor.
+
+Quem tem acesso de dono ao banco (SQL Editor ou chave `service_role`) continua enxergando tudo.
+A busca (`search_chats`) usa `SECURITY INVOKER`, portanto respeita as mesmas regras. Ela não usa
+índice de texto; reavalie se o volume de mensagens deixar a busca lenta.

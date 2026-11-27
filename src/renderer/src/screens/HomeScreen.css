@@ -1112,3 +1112,15 @@
 .home-composer-toolbar .context-meter > summary { height: 28px; padding: 0 10px; }
 .home-composer-toolbar .home-composer-icon-btn { width: 28px; height: 28px; }
 .home-composer-toolbar .home-composer-send { width: 30px; height: 30px; }
+
+/* Complex demand toggle, published read-only sessions and client context hint. */
+.home-complex-toggle { display: inline-flex; flex-shrink: 0; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border: 1px solid var(--color-hairline); border-radius: var(--radius-md); font-size: 12px; color: var(--color-ink-subtle); }
+.home-complex-toggle:hover:not(:disabled) { background: var(--color-surface-3); }
+.home-complex-toggle-on { border-color: var(--color-primary); color: var(--color-primary); }
+.home-complex-toggle:disabled { opacity: 0.5; }
+.home-composer-card[hidden] { display: none; }
+.home-readonly, .home-context-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; font-size: 12px; color: var(--color-ink-subtle); }
+.home-readonly { justify-content: space-between; width: 100%; padding: 12px 14px; border: 1px solid var(--color-hairline); border-radius: var(--radius-lg); background: var(--color-surface-2); }
+.home-context-hint { justify-content: center; max-width: 560px; }
+.home-readonly button, .home-context-hint button { padding: 6px 10px; border: 1px solid var(--color-hairline); border-radius: var(--radius-md); font-size: 12px; color: var(--color-primary); }
+.home-readonly button:disabled { opacity: 0.5; }

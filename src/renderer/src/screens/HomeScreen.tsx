@@ -34,6 +34,8 @@ import { sessionContextUsage } from '@renderer/lib/sessionContextUsage'
 import type { SapAdtConnectionView } from '../../../shared/sapAdt'
 import { ContextMeter } from '@renderer/components/ContextMeter'
 import { DEFAULT_COMPACTION } from '../../../shared/compaction'
+import { agentArea, areaModule, artifactDestination } from '@renderer/lib/clientArea'
+import { COMPLEX_INPUT_BUDGET, COMPLEX_MODE_PROMPT, sessionCompaction } from '@renderer/lib/complexMode'
 import { SettingsModal } from '@renderer/components/SettingsModal/SettingsModal'
 import {
   ChatMessageItem,
@@ -157,7 +159,7 @@ export function HomeScreen(): JSX.Element {
   const [modelChoiceError, setModelChoiceError] = useState<string | null>(null)
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false)
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
-  const [driveFolders, setDriveFolders] = useState<DriveFolder[]>([])
+  const [driveFolders, setDriveFolders] = useState<(DriveFolder & { moduleId: string })[]>([])
   const [folderLoadError, setFolderLoadError] = useState<string | null>(null)
   const [folderNotice, setFolderNotice] = useState<string | null>(null)
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
@@ -196,7 +198,11 @@ export function HomeScreen(): JSX.Element {
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<AttachmentFile[]>([])
   const [currentClientId, setCurrentClientId] = useState<string | null>(null)
+  // Drive area of the current chat. A new session has none until the agent is chosen.
   const [currentModuleId, setCurrentModuleId] = useState<string | null>(null)
+  const [chatOwnerId, setChatOwnerId] = useState<string | null>(null)
+  const [complexMode, setComplexMode] = useState(false)
+  const [duplicating, setDuplicating] = useState(false)
 
   const modelMenuRef = useRef<HTMLDivElement>(null)
   const modelTriggerRef = useRef<HTMLButtonElement>(null)
@@ -214,17 +220,6 @@ export function HomeScreen(): JSX.Element {
   const isStreaming = useChatRuntimeStore((state) =>
     currentChatId ? (state.runtimes[currentChatId]?.streaming ?? false) : false
   )
-  // Each ABAP block in this session can be approved as a pattern of the session's client.
-  useEffect(() => {
-    useCodePatternsStore
-      .getState()
-      .setScope(
-        currentClientId && currentModuleId
-          ? { clientId: currentClientId, moduleId: currentModuleId, chatId: currentChatId, streaming: isStreaming }
-          : null
-      )
-    return () => useCodePatternsStore.getState().setScope(null)
-  }, [currentClientId, currentModuleId, currentChatId, isStreaming])
   const messages = useMemo(
     () => (currentChatId ? (runtimeMessages ?? []) : draftMessages),
     [currentChatId, runtimeMessages, draftMessages]
@@ -247,24 +242,47 @@ export function HomeScreen(): JSX.Element {
   const advancedFlowEnabled = !antigravityActive && advancedFlowOwner === user?.id && flowsEnabled && advancedFlowConfig.enabled
   const { models: managedModels, blocks: modelBlocks, load: loadModels } = useAiModelsStore()
   useEffect(() => { if (user) void loadModels() }, [user, loadModels])
-  const chatScope: WorkScope | null = currentClientId && currentModuleId && (currentChatId || (view === 'chat' && (selectedFolderId || input.trim() || attachments.length > 0)))
-    ? { clientId: currentClientId, moduleId: currentModuleId, folderId: selectedFolderId, chatId: currentChatId }
-    : null
-  const { presence, error: presenceError } = useWorkPresence(user?.id ?? null, chatScope, view === 'clients' ? driveActivity : null)
   const { clients, modules, load: loadClients } = useClientsStore()
   useEffect(() => { if (user) void loadClients() }, [user, loadClients])
+  const selectedFolder = driveFolders.find((folder) => folder.id === selectedFolderId) ?? null
+  // The folder decides the area it belongs to; before its list loads, the chat area is used.
+  const activeModuleId = selectedFolder?.moduleId ?? currentModuleId
+  const programsModuleId = currentClientId ? areaModule(modules, currentClientId, 'programs')?.id ?? null : null
+  // Presence of an existing chat must use the chat's own area (validated by the database).
+  const presenceModuleId = currentChatId ? currentModuleId : activeModuleId ?? programsModuleId
+  const chatScope: WorkScope | null = currentClientId && presenceModuleId && (currentChatId || (view === 'chat' && (selectedFolderId || input.trim() || attachments.length > 0)))
+    ? { clientId: currentClientId, moduleId: presenceModuleId, folderId: !selectedFolder || selectedFolder.moduleId === presenceModuleId ? selectedFolderId : null, chatId: currentChatId }
+    : null
+  const { presence, error: presenceError } = useWorkPresence(user?.id ?? null, chatScope, view === 'clients' ? driveActivity : null)
+  // Approved patterns are always filed with the client's programs.
   useEffect(() => {
-    if (!currentModuleId) { setDriveFolders([]); return }
+    const moduleId = programsModuleId ?? currentModuleId
+    useCodePatternsStore
+      .getState()
+      .setScope(
+        currentClientId && moduleId
+          ? { clientId: currentClientId, moduleId, chatId: currentChatId, streaming: isStreaming }
+          : null
+      )
+    return () => useCodePatternsStore.getState().setScope(null)
+  }, [currentClientId, currentModuleId, programsModuleId, currentChatId, isStreaming])
+  useEffect(() => {
+    const areas = modules.filter((module) => module.clientId === currentClientId)
+    if (!areas.length) { setDriveFolders([]); return }
     let active = true
-    void loadClientFolders(currentModuleId)
-      .then((folders) => { if (active) { setDriveFolders(folders); setFolderLoadError(null) } })
+    void Promise.all(areas.map(async (area) => (await loadClientFolders(area.id)).map((folder) => ({ ...folder, moduleId: area.id }))))
+      .then((lists) => { if (active) { setDriveFolders(lists.flat()); setFolderLoadError(null) } })
       .catch((cause: Error) => { if (active) setFolderLoadError(cause.message) })
     return () => { active = false }
-  }, [currentModuleId, folderPickerOpen])
+  }, [currentClientId, modules, folderPickerOpen])
+  const driveFolderLabel = (id: string): string => {
+    const folder = driveFolders.find((item) => item.id === id)
+    if (!folder) return ''
+    return `${modules.find((module) => module.id === folder.moduleId)?.name ?? 'Área'} / ${folderPath(id, driveFolders)}`
+  }
   useEffect(() => {
     if (!currentChatId && !currentClientId && clients.length && modules.length) {
       setCurrentClientId(modules[0].clientId)
-      setCurrentModuleId(modules[0].id)
     }
   }, [clients, modules, currentChatId, currentClientId])
   const { apiKeys, setDefaultModel, aiPreferences } = useSettingsStore((state) => ({
@@ -384,7 +402,10 @@ export function HomeScreen(): JSX.Element {
 
   const contextKey = user && currentChatId ? `${user.id}:${currentChatId}` : ''
   const contextState = useContextStore((state) => state.contexts[contextKey])
-  const compactionSettings = useLocalFeaturesStore((state) => state.userId === user?.id ? state.status?.settings.compaction : undefined) ?? DEFAULT_COMPACTION
+  const savedCompaction = useLocalFeaturesStore((state) => state.userId === user?.id ? state.status?.settings.compaction : undefined) ?? DEFAULT_COMPACTION
+  const compactionSettings = useMemo(() => sessionCompaction(savedCompaction, complexMode), [savedCompaction, complexMode])
+  // Someone else's published session can be read, never continued in place.
+  const readOnly = Boolean(currentChatId) && chatOwnerId !== user?.id
   useEffect(() => { if (user) void useLocalFeaturesStore.getState().load(user.id) }, [user])
   useEffect(() => {
     if (!user || !currentChatId || isStreaming) return
@@ -422,6 +443,7 @@ export function HomeScreen(): JSX.Element {
   }
 
   async function handleCompact(): Promise<void> {
+    if (readOnly) return
     if (!user || !currentChatId || isStreaming) { setModelChoiceError('Abra uma conversa e aguarde a resposta antes de compactar.'); return }
     const chatId = currentChatId, userId = user.id, rt = useChatRuntimeStore.getState()
     const turns = messages.filter((message) => !message.error && message.content.trim()).map(({ role, content, imageDataUrls }) => ({ role, content, imageDataUrls }))
@@ -432,7 +454,7 @@ export function HomeScreen(): JSX.Element {
     try {
       const status = await window.api.localFeatures.status(userId)
       const countKey = defaultProvider === 'claude' ? await fetchApiKey(userId, 'claude') : null
-      const result = await prepareContext({ userId, chatId, messages: turns, prompt: systemPrompt ?? '', settings: status.settings.compaction, signal: controller.signal, force: true, isCurrentUser: () => useAuthStore.getState().user?.id === userId,
+      const result = await prepareContext({ userId, chatId, messages: turns, prompt: systemPrompt ?? '', settings: sessionCompaction(status.settings.compaction, complexMode), signal: controller.signal, force: true, isCurrentUser: () => useAuthStore.getState().user?.id === userId,
         countTokens: countKey && defaultModel ? (messages, prompt) => countClaudeContext({ apiKey: countKey, model: defaultModel!, messages, prompt, signal: controller.signal }) : undefined,
         authorizeRouter: () => authorizeCompactionRouter(userId), summarizer: antigravitySummarizer(controller.signal), onProgress: (label) => { activity.label = label; rt.updateMessage(chatId, id, { toolActivity: [{ ...activity }] }) } })
       activity.status = 'done'; activity.label = result.changed ? 'Contexto compactado · histórico original preservado' : result.warning ?? 'Contexto já compactado'
@@ -447,6 +469,8 @@ export function HomeScreen(): JSX.Element {
   function resetSession(): void {
     setTaskLaunch(null)
     setCurrentChatId(null)
+    setChatOwnerId(null)
+    setComplexMode(false)
     setDraftMessages([])
     setActiveAgent(null)
     setSelectedAgent(null)
@@ -464,13 +488,16 @@ export function HomeScreen(): JSX.Element {
 
   function handleNewSession(): void {
     const previousFolderId = selectedFolderId
+    const previousFolderModuleId = selectedFolder?.moduleId ?? null
     setView('chat')
     setCurrentProject(null)
     resetSession()
-    if (currentClientId && currentModuleId) {
+    if (currentClientId) {
       setCurrentClientId(currentClientId)
-      setCurrentModuleId(currentModuleId)
-      setSelectedFolderId(previousFolderId)
+      if (previousFolderModuleId) {
+        setCurrentModuleId(previousFolderModuleId)
+        setSelectedFolderId(previousFolderId)
+      }
     }
   }
 
@@ -479,13 +506,12 @@ export function HomeScreen(): JSX.Element {
     setCurrentProject(project)
     resetSession()
     setCurrentClientId(project.clientId)
-    setCurrentModuleId(modules.find((module) => module.clientId === project.clientId)?.id ?? null)
   }
 
-  function handleClientNewChat(clientId: string, moduleId: string, folderId?: string | null): void {
+  function handleClientNewChat(clientId: string, moduleId: string | null, folderId?: string | null): void {
     handleNewSession()
     setCurrentClientId(clientId)
-    setCurrentModuleId(moduleId)
+    setCurrentModuleId(folderId ? moduleId : null)
     setSelectedFolderId(folderId ?? null)
   }
 
@@ -511,6 +537,8 @@ export function HomeScreen(): JSX.Element {
   async function handleSelectChat(chatId: string): Promise<void> {
     setView('chat')
     setCurrentChatId(chatId)
+    setChatOwnerId(null)
+    setComplexMode(false)
     setDraftMessages([])
     setInput('')
     setSapSelection(null)
@@ -520,7 +548,13 @@ export function HomeScreen(): JSX.Element {
     setSessionPanelOpen(false)
 
     const meta = await loadChatMeta(chatId)
-    if (meta) {
+    if (!meta) {
+      handleNewSession()
+      window.alert('Esta sessão não está disponível. Ela pode ser privada de outra pessoa ou ter sido excluída; peça ao autor para publicá-la.')
+      return
+    }
+    {
+      setChatOwnerId(meta.userId)
       setActiveAgent(
         meta.agentId && meta.agentSource
           ? { source: meta.agentSource, id: meta.agentId, name: meta.agentName ?? meta.agentId }
@@ -606,10 +640,15 @@ export function HomeScreen(): JSX.Element {
   }
 
   async function selectDriveFolder(folderId: string | null): Promise<void> {
+    if (readOnly) return
     if (currentChatId) {
-      const { error } = await supabase.from('chats').update({ folder_id: folderId }).eq('id', currentChatId)
+      // A chat keeps its area, so only folders of that area can be stored with it.
+      const sameArea = driveFolders.find((folder) => folder.id === folderId)?.moduleId === currentModuleId
+      const { error } = await supabase.from('chats').update({ folder_id: sameArea ? folderId : null }).eq('id', currentChatId)
       if (error) { setFolderLoadError(error.message); return }
     }
+    // Before the first message, removing the folder also releases the area it implied.
+    if (!currentChatId && !folderId) setCurrentModuleId(null)
     setSelectedFolderId(folderId)
     setFolderNotice(null)
     setFolderPickerOpen(false)
@@ -626,7 +665,7 @@ export function HomeScreen(): JSX.Element {
     const rawText = (overrideText ?? input).trim()
     if (/^\/compact$/i.test(rawText)) { if (!overrideText) setInput(''); await handleCompact(); return }
     const readyAttachments = attachments.filter((attachment) => attachment.status === 'ready')
-    if ((!rawText && readyAttachments.length === 0 && !selectedFolderId) || isStreaming) return
+    if (readOnly || (!rawText && readyAttachments.length === 0 && !selectedFolderId) || isStreaming) return
     if (attachments.some((attachment) => attachment.status === 'reading')) return
 
     const text = rawText || (selectedFolderId ? 'Analise os arquivos da pasta selecionada.' : '(sem mensagem — ver anexos)')
@@ -660,8 +699,17 @@ export function HomeScreen(): JSX.Element {
       void loadModels()
       return
     }
-    if (!currentClientId || !currentModuleId) {
-      pushLocalError('Selecione um cliente e módulo antes de iniciar a sessão.')
+    if (!currentClientId) {
+      pushLocalError('Selecione um cliente antes de iniciar a sessão.')
+      return
+    }
+    const clientAreas = modules.filter((module) => module.clientId === currentClientId)
+    if (!clientAreas.length) {
+      pushLocalError('Este cliente não tem nenhuma área no drive. Peça a um administrador para criar o módulo Programas.')
+      return
+    }
+    if (selectedFolderId && !activeModuleId) {
+      pushLocalError('A pasta selecionada ainda está carregando. Tente enviar novamente.')
       return
     }
 
@@ -680,7 +728,7 @@ export function HomeScreen(): JSX.Element {
     let folderReference: Awaited<ReturnType<typeof loadFolderReference>> | null = null
     if (selectedFolderId) {
       try {
-        folderReference = await loadFolderReference(currentClientId, currentModuleId, selectedFolderId)
+        folderReference = await loadFolderReference(currentClientId, activeModuleId!, selectedFolderId)
         setFolderNotice(`${folderReference.names.length} arquivo(s) disponível(is) para busca e leitura completa pelo agente.`)
 
       } catch (cause) {
@@ -759,6 +807,7 @@ export function HomeScreen(): JSX.Element {
     setAttachmentNotice(null)
 
     let chatId = currentChatId
+    let chatModuleId = currentModuleId
     let agent = activeAgent
     let prompt = systemPrompt
     let skillIds: string[] = []
@@ -843,20 +892,6 @@ export function HomeScreen(): JSX.Element {
         setIsRouting(false)
       }
 
-      // O router depende de chave Claude e falha em silêncio. Sem agente definido,
-      // módulos dedicados usam o agente padrão correspondente (EF gera o Word).
-      if (!agent) {
-        const moduleDefaultId =
-          currentModuleId === 'efs' ? 'ef_consultant' : currentModuleId === 'dtecs' ? 'dtec_consultant' : null
-        const fallbackAgent = moduleDefaultId
-          ? availableAgents.find((item) => item.source === 'default' && item.id === moduleDefaultId)
-          : undefined
-        if (fallbackAgent) {
-          agent = { source: fallbackAgent.source, id: fallbackAgent.id, name: fallbackAgent.name }
-          prompt = fallbackAgent.content
-        }
-      }
-
       const routedSkillNames = skills
         .filter((skill) => skillIds.includes(skill.slug))
         .map((skill) => skill.name)
@@ -865,9 +900,12 @@ export function HomeScreen(): JSX.Element {
 
       if (workbookContext) prompt = `${prompt ?? ''}\n\n---\n\n## Workbook do cliente ${selectedClient?.name}\n\n${workbookContext}`
 
+      // The area follows the selected folder or, without one, the routed agent.
+      chatModuleId = activeModuleId ?? areaModule(clientAreas, currentClientId, agentArea(agent))!.id
+
       const newChatId = await createChat({
         clientId: currentClientId,
-        moduleId: currentModuleId,
+        moduleId: chatModuleId,
         folderId: selectedFolderId,
         projectId: currentProject?.id ?? null,
         title: text.slice(0, 60),
@@ -905,6 +943,8 @@ export function HomeScreen(): JSX.Element {
       rt.ensure(chatId, nextDraftMessages)
       setDraftMessages([])
       setCurrentChatId(chatId)
+      setCurrentModuleId(chatModuleId)
+      setChatOwnerId(user.id)
       setActiveAgent(agent)
       setSelectedAgent(agent)
       setSystemPrompt(prompt)
@@ -998,15 +1038,17 @@ export function HomeScreen(): JSX.Element {
     let runtimePrompt = specializedAgent ? prompt : `${prompt ?? ''}\n\n${AI_PRESENTATION_CONTRACT}`
     let compactionAttempted = false
     let turnInputBudget = compactionSettings.inputBudget
+    if (complexMode) runtimePrompt = `${runtimePrompt ?? ''}\n\n---\n\n${COMPLEX_MODE_PROMPT}`
     async function prepareTurnContext(): Promise<void> {
       let step: ToolActivityItem | undefined
       try {
         const status = await window.api.localFeatures.status(user!.id)
-        turnInputBudget = status.settings.compaction.inputBudget
+        const turnSettings = sessionCompaction(status.settings.compaction, complexMode)
+        turnInputBudget = turnSettings.inputBudget
         const result = await prepareContext({
           userId: user!.id, chatId: chatId!,
           messages: sourceHistory,
-          prompt: runtimePrompt ?? '', settings: { ...status.settings.compaction, automatic: status.settings.compaction.automatic && !compactionAttempted },
+          prompt: runtimePrompt ?? '', settings: { ...turnSettings, automatic: turnSettings.automatic && !compactionAttempted },
           signal: controller.signal, isCurrentUser: () => useAuthStore.getState().user?.id === user!.id,
           countTokens: runProvider === 'claude' ? (messages, prompt) => countClaudeContext({ apiKey: apiKey!, model: runModel!, messages, prompt, signal: controller.signal }) : undefined,
           authorizeRouter: () => authorizeCompactionRouter(user!.id),
@@ -1098,14 +1140,14 @@ export function HomeScreen(): JSX.Element {
         step.status = 'done'
         pushToolActivity()
         if (preparedEfTemplate.snapshot) runtimePrompt = `${runtimePrompt ?? ''}\n\n${efTemplatePrompt(preparedEfTemplate.snapshot, preparedEfTemplate.label)}`
-        runtimePrompt = `${runtimePrompt ?? ''}\n\n${efEstimatePrompt(efEstimateParameters, selectedClient?.name ?? '')}\n\n## Identificação atual da EF\nCliente: ${JSON.stringify(selectedClient?.name ?? 'A CONFIRMAR')}; módulo selecionado: ${JSON.stringify(modules.find((module) => module.id === currentModuleId)?.name ?? 'A CONFIRMAR')}; consultor autenticado: ${JSON.stringify(profile?.nome ?? 'A CONFIRMAR')}; data de emissão: ${new Date().toLocaleDateString('pt-BR')}. Use esses dados nos campos correspondentes. Não confunda data de emissão com data de solicitação ou aprovação.`
+        runtimePrompt = `${runtimePrompt ?? ''}\n\n${efEstimatePrompt(efEstimateParameters, selectedClient?.name ?? '')}\n\n## Identificação atual da EF\nCliente: ${JSON.stringify(selectedClient?.name ?? 'A CONFIRMAR')}; área do drive: ${JSON.stringify(areaModule(modules, currentClientId, 'ef')?.name ?? 'A CONFIRMAR')}; consultor autenticado: ${JSON.stringify(profile?.nome ?? 'A CONFIRMAR')}; data de emissão: ${new Date().toLocaleDateString('pt-BR')}. Use esses dados nos campos correspondentes. Não confunda data de emissão com data de solicitação ou aprovação.`
       }
       if (agent || fileWorkspace || advancedConfig) {
         const mcpServers = agent ? configsForAgent(agent.source, agent.id) : []
         if (mcpServers.length > 0 || fileWorkspace || advancedConfig || (sapRequested && user?.id)) {
           await prepareTurnContext()
           try {
-            const progressScope = JSON.stringify([user.id, chatId, currentClientId, currentModuleId, selectedFolderId, sapConnectionId, agent?.source, agent?.id])
+            const progressScope = JSON.stringify([user.id, chatId, currentClientId, chatModuleId, selectedFolderId, sapConnectionId, agent?.source, agent?.id])
             const previousProgress = messages.flatMap(message => message.toolActivity ?? []).map(item => item.workProgress).filter((progress): progress is WorkProgress => progress?.scope === progressScope).at(-1)
             const progressItem: ToolActivityItem = { id: 'workspace-progress', label: 'Progresso da tarefa', kind: 'document', status: 'running' }
             toolActivity.push(progressItem)
@@ -1290,11 +1332,12 @@ export function HomeScreen(): JSX.Element {
       const efData = agent?.source === 'default' && agent.id === 'ef_consultant' && !streamFailed && !controller.signal.aborted && finished
         ? parseEfDocxResponse(accumulated, !preparedEfTemplate?.snapshot)
         : null
-      if (efData && preparedEfTemplate) {
+      const efDestination = efData ? artifactDestination(modules, currentClientId, 'ef', selectedFolder) : null
+      if (efData && preparedEfTemplate && efDestination) {
         const estimate = calculateEfEstimate(efData.estimate, selectedClient?.name ?? efData.client_name, efEstimateParameters ?? { parameters: [], clients: [], capturedAt: new Date().toISOString(), error: 'Os parâmetros desta solicitação não foram carregados.' })
-        const destinationLabel = `${selectedClient?.name ?? 'Cliente'} / ${modules.find((module) => module.id === currentModuleId)?.name ?? 'Módulo'}${selectedFolderId ? ` / ${folderPath(selectedFolderId, driveFolders)}` : ''}`
-        const job: EfDocumentJob = { fileId: crypto.randomUUID(), clientId: currentClientId, moduleId: currentModuleId, folderId: selectedFolderId, userId: user.id, destinationLabel, templateFileId: preparedEfTemplate.fileId, templateLabel: preparedEfTemplate.label, templateRevision: preparedEfTemplate.snapshot?.revision, fileName: efDocxFileName(efData), state: 'pending', estimate,
-          identity: { author: profile?.nome ?? 'A CONFIRMAR', clientName: selectedClient?.name ?? 'A CONFIRMAR', module: modules.find((module) => module.id === currentModuleId)?.name ?? 'A CONFIRMAR', issueDate: new Date().toLocaleDateString('pt-BR') } }
+        const destinationLabel = `${selectedClient?.name ?? 'Cliente'} / ${efDestination.folderId ? driveFolderLabel(efDestination.folderId) : efDestination.module.name}`
+        const job: EfDocumentJob = { fileId: crypto.randomUUID(), clientId: currentClientId, moduleId: efDestination.module.id, folderId: efDestination.folderId, userId: user.id, destinationLabel, templateFileId: preparedEfTemplate.fileId, templateLabel: preparedEfTemplate.label, templateRevision: preparedEfTemplate.snapshot?.revision, fileName: efDocxFileName(efData), state: 'pending', estimate,
+          identity: { author: profile?.nome ?? 'A CONFIRMAR', clientName: selectedClient?.name ?? 'A CONFIRMAR', module: efDestination.module.name, issueDate: new Date().toLocaleDateString('pt-BR') } }
         const step: ToolActivityItem = { id: 'ef-output', label: 'Gerando e salvando EF no drive', kind: 'document', status: 'running', efDocument: job }
         toolActivity.push(step)
         pushToolActivity()
@@ -1315,7 +1358,9 @@ export function HomeScreen(): JSX.Element {
           pushToolActivity()
           try {
             const saved: string[] = []
-            await saveAbapArtifacts({ userId: user.id, clientId: currentClientId, moduleId: currentModuleId, folderId: selectedFolderId, chatId, messageId: assistantId }, artifacts, controller.signal, (name) => {
+            // Not null: sending already requires a client with at least one drive area.
+            const destination = artifactDestination(modules, currentClientId, 'programs', selectedFolder)!
+            await saveAbapArtifacts({ userId: user.id, clientId: currentClientId, moduleId: destination.module.id, folderId: destination.folderId, chatId, messageId: assistantId }, artifacts, controller.signal, (name) => {
               saved.push(name)
               step.label = 'ABAP salvo: ' + saved.join(', ')
               pushToolActivity()
@@ -1432,9 +1477,9 @@ export function HomeScreen(): JSX.Element {
     : (selectedAgent?.name ?? 'Automático')
   const selectedClient = clients.find((client) => client.id === currentClientId)
   const selectedModule = modules.find((module) => module.id === currentModuleId)
-  const selectedFolderName = selectedFolderId ? folderPath(selectedFolderId, driveFolders) : null
+  const selectedFolderName = selectedFolderId ? driveFolderLabel(selectedFolderId) : null
   const folderWorkers = selectedFolderId
-    ? presence.filter((item) => item.clientId === currentClientId && item.moduleId === currentModuleId && item.folderId === selectedFolderId)
+    ? presence.filter((item) => item.clientId === currentClientId && item.folderId === selectedFolderId)
     : []
   const activeFolderLabel = presenceLabel(folderWorkers, user?.id ?? null)
   const activeChatLabel = currentChatId
@@ -1444,7 +1489,7 @@ export function HomeScreen(): JSX.Element {
   const promptOptions = promptTrigger && !shortcutsDismissed
     ? promptTrigger[1] === '/'
       ? PROMPT_SHORTCUTS.filter((item) => item.command.includes(input.toLowerCase())).map((item) => ({ label: item.command, detail: item.label, prompt: item.prompt, folderId: null as string | null }))
-      : driveFolders.filter((folder) => folderPath(folder.id, driveFolders).toLocaleLowerCase('pt-BR').includes(promptTrigger[2].toLocaleLowerCase('pt-BR'))).slice(0, 12).map((folder) => ({ label: folderPath(folder.id, driveFolders), detail: 'Pasta do drive · usar como contexto', prompt: '', folderId: folder.id }))
+      : driveFolders.filter((folder) => driveFolderLabel(folder.id).toLocaleLowerCase('pt-BR').includes(promptTrigger[2].toLocaleLowerCase('pt-BR'))).slice(0, 12).map((folder) => ({ label: driveFolderLabel(folder.id), detail: 'Pasta do drive · usar como contexto', prompt: '', folderId: folder.id }))
     : []
   function applyPromptOption(index: number): void {
     const option = promptOptions[index]
@@ -1509,7 +1554,7 @@ export function HomeScreen(): JSX.Element {
               files={sessionFiles}
               skills={sessionSkillNames}
               mcps={sessionMcps}
-              environment={selectedClient ? `${selectedClient.name} / ${selectedModule?.name ?? 'Módulo'}` : 'Nenhum cliente selecionado'}
+              environment={selectedClient ? selectedClient.name : 'Nenhum cliente selecionado'}
               clientName={selectedClient?.name ?? null}
               moduleName={selectedModule?.name ?? null}
               projectName={currentProject?.name ?? null}
@@ -1520,7 +1565,7 @@ export function HomeScreen(): JSX.Element {
               contextDetail={contextState?.detail}
               contextError={contextState?.error}
               compacting={contextState?.phase === 'compacting'}
-              compactDisabled={!currentChatId || isStreaming}
+              compactDisabled={!currentChatId || isStreaming || readOnly}
               onCompact={() => void handleCompact()}
               onClose={() => setSessionPanelOpen(false)}
             />
@@ -1554,6 +1599,13 @@ export function HomeScreen(): JSX.Element {
                   {firstName ? `Olá, ${firstName}` : 'Olá'}
                 </h1>
                 <p className="home-welcome-subtitle">Em que vamos trabalhar hoje?</p>
+                {selectedClient && !selectedClient.workbookMd?.trim() && (
+                  <p className="home-context-hint" role="note">
+                    <AlertCircle size={13} />
+                    <span>{selectedClient.name} ainda não tem Workbook: regras, objetos Z e convenções precisarão ser explicados na conversa.</span>
+                    <button type="button" onClick={() => setView('clients')}>Abrir Clientes</button>
+                  </p>
+                )}
                 <PromptStarters onSelect={preparePrompt} />
               </div>
             ) : (
@@ -1566,7 +1618,7 @@ export function HomeScreen(): JSX.Element {
                       activeAgent?.source === 'default' && activeAgent.id === 'ef_consultant'
                     }
                     onClarifyAnswer={handleClarifyAnswer}
-                    clarifyDisabled={isStreaming || isRouting}
+                    clarifyDisabled={isStreaming || isRouting || readOnly}
                     onPrompt={preparePrompt}
                   />
                 ))}
@@ -1576,7 +1628,25 @@ export function HomeScreen(): JSX.Element {
           </div>
 
           <div className="home-composer">
-            <div className="home-composer-card">
+            {readOnly && chatOwnerId && (
+              <div className="home-readonly" role="status">
+                <span>Sessão publicada por outra pessoa. Você pode ler; para continuar, crie uma cópia privada.</span>
+                <button
+                  type="button"
+                  disabled={duplicating}
+                  onClick={() => {
+                    setDuplicating(true)
+                    void useChatStore.getState().duplicateChat(currentChatId!)
+                      .then((id) => handleSelectChat(id))
+                      .catch((cause: Error) => window.alert(cause.message))
+                      .finally(() => setDuplicating(false))
+                  }}
+                >
+                  {duplicating ? 'Duplicando…' : 'Duplicar para continuar'}
+                </button>
+              </div>
+            )}
+            <div className="home-composer-card" hidden={readOnly}>
             {(currentProject || attachments.length > 0 || selectedFolderId || activeChatLabel || folderNotice) && (
               <div className="home-composer-badges">
                 {currentProject && (
@@ -1631,7 +1701,7 @@ export function HomeScreen(): JSX.Element {
             )}
 
             {promptTrigger && !shortcutsDismissed && <div className="ai-command-menu" id="composer-shortcuts" role="listbox" aria-label={promptTrigger[1] === '/' ? 'Comandos de prompt' : 'Pastas do contexto'}>
-              {promptOptions.length ? promptOptions.map((option, index) => <button type="button" role="option" id={`composer-shortcut-${index}`} aria-selected={index === Math.min(shortcutIndex, promptOptions.length - 1)} key={option.folderId ?? option.label} onClick={() => applyPromptOption(index)}><strong>{option.label}</strong><span>{option.detail}</span></button>) : <p className="ai-empty">{promptTrigger[1] === '@' ? 'Nenhuma pasta disponível para este módulo.' : 'Nenhum comando encontrado.'}</p>}
+              {promptOptions.length ? promptOptions.map((option, index) => <button type="button" role="option" id={`composer-shortcut-${index}`} aria-selected={index === Math.min(shortcutIndex, promptOptions.length - 1)} key={option.folderId ?? option.label} onClick={() => applyPromptOption(index)}><strong>{option.label}</strong><span>{option.detail}</span></button>) : <p className="ai-empty">{promptTrigger[1] === '@' ? 'Nenhuma pasta disponível para este cliente.' : 'Nenhum comando encontrado.'}</p>}
             </div>}
             {attachmentNotice && <p className="home-folder-notice" role="alert">{attachmentNotice}</p>}
             <textarea
@@ -1672,19 +1742,19 @@ export function HomeScreen(): JSX.Element {
                 {attachmentMenuOpen && (
                   <div className="home-agent-menu home-attachment-menu">
                     <button type="button" className="home-agent-menu-item" onClick={() => { setAttachmentMenuOpen(false); fileInputRef.current?.click() }}><FileText size={15} /><span>Enviar arquivo local</span></button>
-                    <button type="button" className="home-agent-menu-item" disabled={!currentModuleId} onClick={() => { setAttachmentMenuOpen(false); setFolderPickerOpen(true) }}><FolderOpen size={15} /><span>Selecionar pasta do drive</span></button>
+                    <button type="button" className="home-agent-menu-item" disabled={!currentClientId} onClick={() => { setAttachmentMenuOpen(false); setFolderPickerOpen(true) }}><FolderOpen size={15} /><span>Selecionar pasta do drive</span></button>
                   </div>
                 )}
                 {folderPickerOpen && (
                   <div className="home-agent-menu home-drive-folder-menu">
-                    <div className="home-drive-folder-heading"><strong>{selectedClient?.name} / {selectedModule?.name}</strong><button type="button" onClick={() => setFolderPickerOpen(false)} aria-label="Fechar seleção de pasta"><X size={14} /></button></div>
+                    <div className="home-drive-folder-heading"><strong>{selectedClient?.name}</strong><button type="button" onClick={() => setFolderPickerOpen(false)} aria-label="Fechar seleção de pasta"><X size={14} /></button></div>
                     {folderLoadError && <span className="home-client-empty">{folderLoadError}</span>}
                     {driveFolders.map((folder) => {
-                      const workers = presence.filter((item) => item.clientId === currentClientId && item.moduleId === currentModuleId && item.folderId === folder.id)
+                      const workers = presence.filter((item) => item.clientId === currentClientId && item.folderId === folder.id)
                       const label = presenceLabel(workers, user?.id ?? null)
-                      return <button key={folder.id} type="button" className={`home-agent-menu-item ${folder.id === selectedFolderId ? 'home-agent-menu-item-active' : ''}`} onClick={() => void selectDriveFolder(folder.id)}><FolderOpen size={14} /><span>{folderPath(folder.id, driveFolders)}</span>{label && <small>{label}</small>}</button>
+                      return <button key={folder.id} type="button" className={`home-agent-menu-item ${folder.id === selectedFolderId ? 'home-agent-menu-item-active' : ''}`} onClick={() => void selectDriveFolder(folder.id)}><FolderOpen size={14} /><span>{driveFolderLabel(folder.id)}</span>{label && <small>{label}</small>}</button>
                     })}
-                    {driveFolders.length === 0 && !folderLoadError && <span className="home-client-empty">Nenhuma subpasta neste módulo.</span>}
+                    {driveFolders.length === 0 && !folderLoadError && <span className="home-client-empty">Nenhuma pasta no drive deste cliente.</span>}
                     {selectedFolderId && <button type="button" className="home-agent-menu-item" onClick={() => void selectDriveFolder(null)}>Remover pasta selecionada</button>}
                     {presenceError && <span className="home-client-empty">Status de trabalho indisponível.</span>}
                   </div>
@@ -1693,32 +1763,30 @@ export function HomeScreen(): JSX.Element {
 
               <ChipMenu
                 icon={<Building2 size={14} strokeWidth={1.75} />}
-                label={selectedClient && selectedModule ? `${selectedClient.name} / ${selectedModule.name}` : 'Cliente / módulo *'}
-                title={currentChatId ? 'O cliente e módulo ficam fixos após a primeira mensagem' : 'Selecionar cliente e módulo'}
+                label={selectedClient?.name ?? 'Cliente *'}
+                title={currentChatId ? 'O cliente fica fixo após a primeira mensagem' : 'Selecionar cliente'}
                 disabled={Boolean(currentChatId)}
-                active={Boolean(selectedClient && selectedModule)}
-                required={!currentClientId || !currentModuleId}
+                active={Boolean(selectedClient)}
+                required={!currentClientId}
               >
                 {(close) => (
                   <>
-                    {clients.map((client) => (
-                      <div key={client.id} className="home-client-group">
-                        <strong>{client.name}</strong>
-                        {modules.filter((module) => module.clientId === client.id).map((module) => (
-                          <button
-                            key={module.id}
-                            type="button"
-                            role="menuitem"
-                            className={`chip-menu-item ${module.id === currentModuleId ? 'chip-menu-item-active' : ''}`}
-                            onClick={() => { setCurrentClientId(client.id); setCurrentModuleId(module.id); setSelectedFolderId(null); setFolderNotice(null); setCurrentProject(null); close() }}
-                          >
-                            {module.name}
-                            <small>{client.name}</small>
-                          </button>
-                        ))}
-                      </div>
+                    {clients.filter((client) => !client.archivedAt && modules.some((module) => module.clientId === client.id)).map((client) => (
+                      <button
+                        key={client.id}
+                        type="button"
+                        role="menuitem"
+                        className={`chip-menu-item ${client.id === currentClientId ? 'chip-menu-item-active' : ''}`}
+                        onClick={() => {
+                          if (client.id !== currentClientId) { setCurrentModuleId(null); setSelectedFolderId(null); setFolderNotice(null); setCurrentProject(null) }
+                          setCurrentClientId(client.id)
+                          close()
+                        }}
+                      >
+                        {client.name}
+                      </button>
                     ))}
-                    {clients.length === 0 && <p className="chip-menu-note">Cadastre um cliente e módulo em Clientes.</p>}
+                    {clients.length === 0 && <p className="chip-menu-note">Cadastre um cliente em Clientes.</p>}
                   </>
                 )}
               </ChipMenu>
@@ -1779,6 +1847,18 @@ export function HomeScreen(): JSX.Element {
               )}
 
               <SapConnectionSelector userId={user?.id} value={sapSelection} onChange={setSapSelection} onConnectionChange={setSapConnectionView} refreshKey={settingsOpen} disabled={isRouting || isStreaming} onManage={() => { setSettingsSection('mcp'); setSettingsOpen(true) }} />
+
+              <button
+                type="button"
+                className={`home-complex-toggle ${complexMode ? 'home-complex-toggle-on' : ''}`}
+                aria-pressed={complexMode}
+                disabled={isStreaming}
+                title={`Demanda complexa: amplia o contexto para ao menos ${COMPLEX_INPUT_BUDGET.toLocaleString('pt-BR')} tokens e pede plano e um objeto por vez. Consome mais tokens da API. Vale enquanto esta sessão estiver aberta.`}
+                onClick={() => setComplexMode((value) => !value)}
+              >
+                <Layers3 size={14} strokeWidth={1.75} />
+                <span>Complexa</span>
+              </button>
 
               <div className="home-composer-spacer" />
               <ContextMeter used={contextUsed} settings={compactionSettings} phase={contextState?.phase ?? 'idle'} detail={contextState?.detail ?? ''} error={contextState?.error} covered={contextState?.snapshot?.coveredCount ?? 0} disabled={!currentChatId || isStreaming} onCompact={() => void handleCompact()} />
@@ -1908,7 +1988,7 @@ export function HomeScreen(): JSX.Element {
                   title="Enviar"
                   disabled={
                     (!input.trim() && attachments.length === 0 && !selectedFolderId) ||
-                    !currentClientId || !currentModuleId ||
+                    !currentClientId ||
                     attachments.some((attachment) => attachment.status === 'reading')
                   }
                   onClick={() => handleSend()}
